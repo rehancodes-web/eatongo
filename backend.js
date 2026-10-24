@@ -6,13 +6,26 @@
   'use strict';
 
   /* ====== 1. PASTE YOUR FIREBASE CONFIG HERE (leave databaseURL empty = local test mode) ====== */
-  const FIREBASE_CONFIG = {
-    apiKey: '',
-    authDomain: '',
-    databaseURL: '',   // e.g. https://your-project-default-rtdb.firebaseio.com
-    projectId: '',
-    appId: ''
-  };
+const firebaseConfig = {
+
+  apiKey: "AIzaSyDQy3PGM914RE8A8Y50dHxjsVpeBDsJLZw",
+
+  authDomain: "eatongohh.firebaseapp.com",
+
+  databaseURL: "https://eatongohh-default-rtdb.asia-southeast1.firebasedatabase.app",
+
+  projectId: "eatongohh",
+
+  storageBucket: "eatongohh.firebasestorage.app",
+
+  messagingSenderId: "768793879173",
+
+  appId: "1:768793879173:web:d83a699ba459400d7a3fec",
+
+  measurementId: "G-PL8P8QBSYG"
+
+};
+
   /* ========================================================================================== */
 
   const USE_FIREBASE = !!FIREBASE_CONFIG.databaseURL;
