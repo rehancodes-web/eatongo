@@ -77,7 +77,7 @@ const FIREBASE_CONFIG = {
     const v = '10.12.2';
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-app-compat.js`);
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-database-compat.js`);
-    firebase.initializeApp(FIREBASE_CONFIG);
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     const db = firebase.database();
     return {
       async counters(day) {
@@ -274,6 +274,7 @@ const FIREBASE_CONFIG = {
   }
 
   function onOrders(list) {
+    list = (Array.isArray(list) ? list : []).filter(o => o && o.id && o.createdAt);
     const fresh = known === null ? [] : list.filter(o => !known.has(o.id));
     known = new Set(list.map(o => o.id));
     orders = list.slice().sort((a, b) => a.createdAt - b.createdAt);
@@ -297,6 +298,19 @@ const FIREBASE_CONFIG = {
   const adv = $('#advanceCustomer'); if (adv) adv.style.display = 'none';   // real status now comes from the vendor
 
   ready.then(s => { store = s; s.subscribe(onOrders); });
+
+  // Expose the same live order data used by the vendor dashboard for analytics.
+  // This keeps daily/weekly/monthly summaries tied to real orders instead of
+  // requiring a second data source in the UI.
+  window.eatongoAnalytics = function(period = 'daily') {
+    const now = Date.now(), dayMs = 86400000;
+    const cutoff = period === 'monthly' ? now - 30 * dayMs : period === 'weekly' ? now - 7 * dayMs : now - dayMs;
+    const scoped = orders.filter(o => Number(o.createdAt) >= cutoff);
+    const itemTotals = {};
+    scoped.forEach(o => (o.items || []).forEach(i => { itemTotals[i.name] = (itemTotals[i.name] || 0) + Number(i.qty || 0); }));
+    const top = Object.entries(itemTotals).sort((a, b) => b[1] - a[1])[0] || ['No sales yet', 0];
+    return { period, orderCount: scoped.length, totalSales: scoped.reduce((sum, o) => sum + Number(o.total || 0), 0), topItem: top[0], topItemQty: top[1], orders: scoped };
+  };
 
   /* optional: run eatongoExport() in the console to download all data as orders.json */
   window.eatongoExport = async () => {
