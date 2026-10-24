@@ -187,8 +187,8 @@ const FIREBASE_CONFIG = {
   /* ---------- vendor: render ---------- */
   const LABEL = { new: 'Accept', preparing: 'Mark ready', ready: 'Complete' };
   const LABEL_OPS = { new: 'Accept order', preparing: 'Mark ready', ready: 'Complete pickup' };
-  const row = o => `<div class="order-row"><div class="order-no">#${o.no}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div><button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button></div>`;
-  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${o.no}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button>`}</article>`;
+  const row = o => `<div class="order-row"><div class="order-no">#${esc(o.token ?? o.no)}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div><button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button></div>`;
+  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${esc(o.token ?? o.no)}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button>`}</article>`;
   const EMPTY_ROW = '<p class="sub" style="padding:14px">No orders here yet. New orders appear instantly.</p>';
   const EMPTY_CARD = '<div class="ops-empty"><b>No orders here</b>The next order will appear automatically.</div>';
 
