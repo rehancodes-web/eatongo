@@ -234,6 +234,7 @@
       const selected = sessionStorage.getItem('eatongo_vendor_outlet') || 'HARI-001';
       if (typeof setOutlet === 'function') setOutlet(selected === 'MING-001' ? 'mingos' : 'hari');
       applyVendorOutlet(selected);
+      history.replaceState(null, '', location.pathname + '?vendor=overview');
       staffEmail = (user.email || '').toLowerCase();
       const card = $('#vendorAuth');
       if (card && !card.classList.contains('hidden')) {
@@ -253,6 +254,8 @@
   }
 
   const authForm = $('#vendorAuthForm');
+  const outletSelect = $('#vendorOutlet');
+  if (outletSelect) outletSelect.onchange = () => sessionStorage.setItem('eatongo_vendor_outlet', outletSelect.value);
   if (authForm) authForm.onsubmit = async e => {
     e.preventDefault();
     const msg = $('#vendorAuthMsg'); if (msg) { msg.style.color = '#5d625b'; msg.textContent = 'Signing in…'; }
@@ -262,6 +265,7 @@
     if (s.mode === 'local') {
       const selected = $('#vendorOutlet')?.value || 'HARI-001';
       if (selected === 'MING-001' && email.toLowerCase() !== 'rehanzn2007@gmail.com') { if (msg) msg.textContent = 'Dummy Mingos admin login is rehanzn2007@gmail.com.'; return; }
+      history.replaceState(null, '', location.pathname + '?vendor=overview');
       setRole('admin'); setOutlet(selected === 'MING-001' ? 'mingos' : 'hari'); applyVendorOutlet(selected); unlock(true); return;
     }
     sessionStorage.setItem('eatongo_intent', '1');
@@ -600,4 +604,5 @@
     a.download = 'orders.json'; a.click();
   };
 })();
+
 
