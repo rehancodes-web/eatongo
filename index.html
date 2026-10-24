@@ -326,6 +326,14 @@
       window.addEventListener('popstate',apply);
       apply();
     })();
+        document.querySelectorAll(".brand").forEach(brand => {
+        brand.style.cursor = "pointer";
+
+        brand.addEventListener("click", () => {
+            window.location.href = window.location.pathname;
+        });
+    });
+    
   </script>
 </body>
 </html>
