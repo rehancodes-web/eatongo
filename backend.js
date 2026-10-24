@@ -59,6 +59,10 @@
       },
       async save(o) { const d = read(); d.orders = d.orders || {}; d.orders[o.id] = o; write(d); },
       async update(id, p) { const d = read(); if (d.orders && d.orders[id]) { Object.assign(d.orders[id], p); write(d); } },
+      async roleOf(email) { const v = (read().staff || {})[emailKey(email)]; return v === 'admin' ? 'admin' : v ? 'vendor' : null; },
+      listStaff(f) { f(read().staff || {}); },
+      async setStaff(email, role) { const d = read(); d.staff = d.staff || {}; d.staff[emailKey(email)] = role; write(d); },
+      async removeStaff(email) { const d = read(); if (d.staff) delete d.staff[emailKey(email)]; write(d); },
       listenAll(f) { subs.length = 0; subs.push(f); f(list()); },
       listenOne(id, f) { subs.length = 0; subs.push(l => f(l.filter(o => o.id === id))); f(list().filter(o => o.id === id)); },
       stop() { subs.length = 0; },
@@ -161,15 +165,18 @@
       if (inVendorView()) { kickToLogin(); return; }
       if (mineId) store.listenOne(mineId, onOrders);
       renderVendor();
-    } else if (sessionStorage.getItem('eatongo_customer_intent')) {
-      sessionStorage.removeItem('eatongo_customer_intent');
-      setRole('customer');
-      if (typeof startScanner === 'function') startScanner();
     } else {
       sessionStorage.setItem('eatongo_vendor', '1');
       store.listenAll(onOrders);
-      mountAdminPanel(r === 'admin' && store.mode === 'firebase');
+      mountAdminPanel(r === 'admin');
     }
+  }
+
+  function applyVendorOutlet(code) {
+    const name = code === 'MING-001' ? 'Mingos' : 'Hari Super Sandwich';
+    document.querySelectorAll('#vendorApp .side .brand .navlabel, #vendorOps .ops-hero .eyebrow').forEach(x => x.textContent = name);
+    const qr = $('#shopQrCard'); if (qr) { const p = qr.querySelector('p'); if (p) p.innerHTML = `Place this at the counter. Customers scan it to open the current menu. Outlet code: <b>${code}</b>`; }
+    const h = $('#vpage-overview h1'); if (h) h.textContent = code === 'MING-001' ? 'Good afternoon, Mingos.' : 'Good afternoon, Hari.';
   }
 
   async function onUser(user) {
@@ -184,12 +191,17 @@
     try { r = user.email ? await store.roleOf(user.email) : null; } catch (e) { console.error(e); }
     if (r) {
       setRole(r);
+      const selected = sessionStorage.getItem('eatongo_vendor_outlet') || 'HARI-001';
+      if (typeof setOutlet === 'function') setOutlet(selected === 'MING-001' ? 'mingos' : 'hari');
+      applyVendorOutlet(selected);
       staffEmail = (user.email || '').toLowerCase();
       const card = $('#vendorAuth');
       if (card && !card.classList.contains('hidden')) {
         if (sessionStorage.getItem('eatongo_intent')) { sessionStorage.removeItem('eatongo_intent'); screen('vendorPlace'); }
         else openVendorOps();                       // already signed in from before: go straight in
       }
+    } else if (sessionStorage.getItem('eatongo_customer_intent')) {
+      sessionStorage.removeItem('eatongo_customer_intent'); setRole('customer'); if (typeof startScanner === 'function') startScanner();
     } else {
       sessionStorage.removeItem('eatongo_intent');
       const m = $('#vendorAuthMsg');
@@ -205,9 +217,13 @@
     e.preventDefault();
     const msg = $('#vendorAuthMsg'); if (msg) { msg.style.color = '#5d625b'; msg.textContent = 'Signing in…'; }
     const s = store || await ready;
-    if (s.mode === 'local') { screen('vendorPlace'); return; }      // local test mode: no real login
     const email = $('#vendorEmail').value.trim(), pass = $('#vendorPass').value;
     sessionStorage.setItem('eatongo_vendor_outlet', $('#vendorOutlet')?.value || 'HARI-001');
+    if (s.mode === 'local') {
+      const selected = $('#vendorOutlet')?.value || 'HARI-001';
+      if (selected === 'MING-001' && email.toLowerCase() !== 'rehanzn2007@gmail.com') { if (msg) msg.textContent = 'Dummy Mingos admin login is rehanzn2007@gmail.com.'; return; }
+      setRole('admin'); setOutlet(selected === 'MING-001' ? 'mingos' : 'hari'); applyVendorOutlet(selected); unlock(true); return;
+    }
     sessionStorage.setItem('eatongo_intent', '1');
     const btn = authForm.querySelector('button[type=submit]'); if (btn) btn.disabled = true;
     // wait for the silent anonymous sign-in to finish first, so it can't overwrite this login
@@ -281,12 +297,12 @@
     if (!on) { if (p) p.remove(); return; }
     if (p) return;
     p = document.createElement('div'); p.id = 'adminPanel'; p.className = 'panel'; p.style.marginTop = '16px';
-    p.innerHTML = '<div class="eyebrow">Admin only</div><h2>Vendor access</h2><p class="sub">Create their account in Firebase (Authentication → Users → Add user) first, then add their email here.</p><div class="scan-input" style="margin:12px 0"><input id="staffEmail" type="email" placeholder="vendor@gmail.com" style="text-transform:none"/><button id="staffAdd" type="button">Add vendor</button></div><div id="staffList"></div>';
+    p.innerHTML = '<div class="eyebrow">Admin only</div><h2>Authorised members</h2><p class="sub">Add or remove member email IDs and choose whether each member is an admin or vendor.</p><div class="scan-input" style="margin:12px 0"><input id="staffEmail" type="email" placeholder="member@gmail.com" style="text-transform:none"/><select id="staffRole"><option value="vendor">Vendor</option><option value="admin">Admin</option></select><button id="staffAdd" type="button">Add member</button></div><div id="staffList"></div>';
     $('#vpage-overview').appendChild(p);
     $('#staffAdd').onclick = async () => {
       const email = $('#staffEmail').value.trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('<b>Enter a valid email.</b>'); return; }
-      try { await store.setStaff(email, 'vendor'); $('#staffEmail').value = ''; toast('<b>Vendor added.</b> ' + esc(email)); }
+      try { await store.setStaff(email, $('#staffRole').value); $('#staffEmail').value = ''; toast('<b>Member added.</b> ' + esc(email)); }
       catch (e) { console.error(e); toast('<b>Could not add.</b> Check database rules.'); }
     };
     p.addEventListener('click', async e => {
@@ -294,7 +310,7 @@
       try { await store.removeStaff(b.dataset.staffRm); toast('<b>Removed.</b>'); } catch (err) { toast('<b>Could not remove.</b>'); }
     });
     store.listStaff(map => {
-      const me = (store.auth.currentUser && store.auth.currentUser.email || '').toLowerCase();
+      const me = ((store.auth && store.auth.currentUser && store.auth.currentUser.email) || '').toLowerCase();
       $('#staffList').innerHTML = Object.entries(map).map(([k, v]) => {
         const em = keyEmail(k);
         return `<div class="history-row"><span><b>${esc(em)}</b><br><small>${esc(v)}</small></span>${em.toLowerCase() === me ? '<small>you</small>' : `<button class="status preparing" data-staff-rm="${esc(em)}">Remove</button>`}</div>`;
@@ -359,9 +375,8 @@
     let tag = $('#passOrderNo');
     if (!tag) { tag = document.createElement('div'); tag.id = 'passOrderNo'; tag.className = 'pass-daily'; tag.style.marginTop = '10px'; $('.pass-identity').appendChild(tag); }
     tag.textContent = `Order ${o.id} · ${o.customer}` + (o.status === 'collected' ? ' · Collected' : '');
-    $('#trackingSummary').textContent = `Order ${o.id} · ` +
-      (o.pickup === 'pre' ? `Pre-order pickup today at ${o.pickupTime}` : 'Estimated pickup in ~8 minutes');
-    statusIndex = FLOW_INDEX[o.status] ?? 0; renderFlow();
+    $('#trackingSummary').textContent = o.status === 'declined' ? `Order ${o.id} · Your order has been declined by the outlet.` : `Order ${o.id} · ` + (o.pickup === 'pre' ? `Pre-order pickup today at ${o.pickupTime}` : 'Estimated pickup in ~8 minutes');
+    if (o.status === 'declined') { const flow = $('#orderFlow'); if (flow) flow.innerHTML = '<div class="success" style="background:#ffe5e2;color:#a43d32;font-weight:850">Your order has been declined by the outlet. Please choose another outlet or place a new order.</div>'; } else { statusIndex = FLOW_INDEX[o.status] ?? 0; renderFlow(); }
   }
 
   /* ---------- vendor: render ---------- */
@@ -471,6 +486,7 @@
         if (mine.status === 'preparing') toast('<b>Order accepted.</b> The kitchen is preparing it.');
         if (mine.status === 'ready') toast(`<b>Order ready!</b> Show code #${esc(mine.auth)} at the counter.`);
         if (mine.status === 'collected') toast('<b>Collected.</b> Enjoy your meal!');
+        if (mine.status === 'declined') toast('<b>Your order has been declined.</b> The outlet could not accept it.');
       }
       lastMineStatus = mine.status;
     }
@@ -494,4 +510,5 @@
     a.download = 'orders.json'; a.click();
   };
 })();
+
 
