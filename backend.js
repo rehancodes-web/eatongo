@@ -1,32 +1,23 @@
-/* eatongo backend layer — add <script src="backend.js"></script> just before </body>
-   - Generates a unique auth code + order no + token per order
-   - Saves orders (Firebase Realtime DB, or localStorage fallback for same-browser testing)
-   - Vendor dashboard / order manager update in real time, status changes sync back to customer */
+/* eatongo backend layer (orders + realtime + Google login + roles)
+   Add <script src="backend.js"></script> just before </body>
+   Roles:  customer = anonymous Firebase user (no login)
+           vendor   = email/password account listed in  staff/<email> = "vendor"
+           admin    = email/password account listed in  staff/<email> = "admin"  (can add/remove vendors)  */
 (() => {
   'use strict';
 
-  /* ====== 1. PASTE YOUR FIREBASE CONFIG HERE (leave databaseURL empty = local test mode) ====== */
-const FIREBASE_CONFIG = {
-
-  apiKey: "AIzaSyDQy3PGM914RE8A8Y50dHxjsVpeBDsJLZw",
-
-  authDomain: "eatongohh.firebaseapp.com",
-
-  databaseURL: "https://eatongohh-default-rtdb.asia-southeast1.firebasedatabase.app",
-
-  projectId: "eatongohh",
-
-  storageBucket: "eatongohh.firebasestorage.app",
-
-  messagingSenderId: "768793879173",
-
-  appId: "1:768793879173:web:d83a699ba459400d7a3fec",
-
-  measurementId: "G-PL8P8QBSYG"
-
-};
-
-  /* ========================================================================================== */
+  /* ====== FIREBASE CONFIG (leave databaseURL empty = local test mode, no login) ====== */
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyDQy3PGM914RE8A8Y50dHxjsVpeBDsJLZw",
+    authDomain: "eatongohh.firebaseapp.com",
+    databaseURL: "https://eatongohh-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "eatongohh",
+    storageBucket: "eatongohh.firebasestorage.app",
+    messagingSenderId: "768793879173",
+    appId: "1:768793879173:web:d83a699ba459400d7a3fec",
+    measurementId: "G-PL8P8QBSYG"
+  };
+  /* ================================================================================== */
 
   const USE_FIREBASE = !!FIREBASE_CONFIG.databaseURL;
   const $ = s => document.querySelector(s);
@@ -34,6 +25,8 @@ const FIREBASE_CONFIG = {
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const today = () => new Date().toLocaleDateString('en-CA');
   const timeStr = ts => new Date(ts).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+  const emailKey = e => String(e).trim().toLowerCase().replace(/\./g, ',');   // firebase keys can't contain "."
+  const keyEmail = k => String(k).replace(/,/g, '.');
 
   /* auth code: 2 letters + 2 digits (no look-alike chars), e.g. KT47 */
   const LET = 'ABCDEFGHJKLMNPQRSTUVWXYZ', DIG = '23456789';
@@ -49,6 +42,8 @@ const FIREBASE_CONFIG = {
     const write = d => { localStorage.setItem(K, JSON.stringify(d)); emit(); };
     addEventListener('storage', e => { if (e.key === K) emit(); });
     return {
+      mode: 'local',
+      uid: () => 'local',
       async counters(day) {
         const d = read(), m = d.meta || {};
         m.orderSeq = (m.orderSeq || 1042) + 1;
@@ -63,7 +58,9 @@ const FIREBASE_CONFIG = {
       },
       async save(o) { const d = read(); d.orders = d.orders || {}; d.orders[o.id] = o; write(d); },
       async update(id, p) { const d = read(); if (d.orders && d.orders[id]) { Object.assign(d.orders[id], p); write(d); } },
-      subscribe(f) { subs.push(f); f(list()); },
+      listenAll(f) { subs.length = 0; subs.push(f); f(list()); },
+      listenOne(id, f) { subs.length = 0; subs.push(l => f(l.filter(o => o.id === id))); f(list().filter(o => o.id === id)); },
+      stop() { subs.length = 0; },
       async exportAll() { return read(); }
     };
   }
@@ -76,10 +73,15 @@ const FIREBASE_CONFIG = {
   async function firebaseStore() {
     const v = '10.12.2';
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-app-compat.js`);
+    await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-auth-compat.js`);
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-database-compat.js`);
     firebase.initializeApp(FIREBASE_CONFIG);
-    const db = firebase.database();
+    const db = firebase.database(), auth = firebase.auth();
+    let off = null;
+    const stop = () => { if (off) { off(); off = null; } };
     return {
+      mode: 'firebase', auth,
+      uid: () => auth.currentUser && auth.currentUser.uid,
       async counters(day) {
         const r = await db.ref('meta').transaction(m => {
           m = m || {};
@@ -91,18 +93,27 @@ const FIREBASE_CONFIG = {
         const m = r.snapshot.val();
         return { no: m.orderSeq, token: m.tokenSeq };
       },
-      async claimAuth(day) {          // atomic: a code can only be claimed once per day
+      async claimAuth(day) {          // rules only allow writing a code that doesn't exist yet
         for (let i = 0; i < 50; i++) {
           const c = genAuth();
-          const r = await db.ref(`authCodes/${day}/${c}`).transaction(v => (v === null ? true : undefined));
-          if (r.committed) return c;
+          try { await db.ref(`authCodes/${day}/${c}`).set(true); return c; } catch (e) { /* taken, retry */ }
         }
         throw new Error('Could not generate auth code');
       },
       save: o => db.ref('orders/' + o.id).set(o),
       update: (id, p) => db.ref('orders/' + id).update(p),
-      subscribe(f) { db.ref('orders').on('value', s => f(Object.values(s.val() || {}))); },
-      async exportAll() { return (await db.ref().once('value')).val(); }
+      listenAll(f) { stop(); const r = db.ref('orders'); const h = r.on('value', s => f(Object.values(s.val() || {})), e => console.error(e)); off = () => r.off('value', h); },
+      listenOne(id, f) { stop(); const r = db.ref('orders/' + id); const h = r.on('value', s => f(s.val() ? [s.val()] : []), e => console.error(e)); off = () => r.off('value', h); },
+      stop,
+      async roleOf(email) {
+        const s = await db.ref('staff/' + emailKey(email)).once('value'), v = s.val();
+        return v === 'admin' ? 'admin' : v ? 'vendor' : null;
+      },
+      listStaff(f) { db.ref('staff').on('value', s => f(s.val() || {}), e => console.error(e)); },
+      setStaff: (email, role) => db.ref('staff/' + emailKey(email)).set(role),
+      removeStaff: email => db.ref('staff/' + emailKey(email)).remove(),
+      signInEmail: (email, pass) => auth.signInWithEmailAndPassword(email, pass),
+      async exportAll() { return { orders: (await db.ref('orders').once('value')).val() }; }
     };
   }
 
@@ -116,11 +127,13 @@ const FIREBASE_CONFIG = {
   })();
 
   /* ---------- state ---------- */
-  let store = null, orders = [], known = null;
+  let store = null, orders = [], known = null, role = 'customer';
   let mineId = sessionStorage.getItem('eatongo_order') || null, lastMineStatus = null;
   let opsTab = 'live', queueTab = 'live';
+  let settleAuth; const authSettled = new Promise(r => { settleAuth = r; });
   const NEXT = { new: 'preparing', preparing: 'ready', ready: 'collected' };
   const FLOW_INDEX = { new: 0, preparing: 2, ready: 3, collected: 4 };
+  const isStaffRole = () => role === 'vendor' || role === 'admin';
 
   const isLive = o => o.status !== 'collected' && o.pickup !== 'pre';
   const isPre = o => o.status !== 'collected' && o.pickup === 'pre';
@@ -128,11 +141,116 @@ const FIREBASE_CONFIG = {
   const itemsText = o => (o.items || []).map(i => `${esc(i.name)} × ${i.qty}`).join(', ');
   const metaText = o => `${esc(o.customer)} · ₹${o.total} · Paid · ${timeStr(o.createdAt)}${o.pickup === 'pre' ? ' · Pre-order ' + esc(o.pickupTime) : ''}`;
 
+  /* ---------- roles / login ---------- */
+  function inVendorView() { return document.body.classList.contains('vendor-mode') || document.body.classList.contains('ops-mode'); }
+  function kickToLogin() {
+    sessionStorage.removeItem('eatongo_vendor');
+    location.replace(location.pathname + '?login');
+  }
+
+  function setRole(r) {
+    role = r; store.stop(); known = null; orders = []; lastMineStatus = null;
+    if (r === 'customer') {
+      mountAdminPanel(false);
+      if (inVendorView()) { kickToLogin(); return; }
+      if (mineId) store.listenOne(mineId, onOrders);
+      renderVendor();
+    } else {
+      sessionStorage.setItem('eatongo_vendor', '1');
+      store.listenAll(onOrders);
+      mountAdminPanel(r === 'admin' && store.mode === 'firebase');
+    }
+  }
+
+  async function onUser(user) {
+    if (!user) {                                   // nobody signed in -> silent anonymous (customer)
+      try { await store.auth.signInAnonymously(); }
+      catch (e) { console.error(e); toast('<b>Setup needed.</b> Enable Anonymous sign-in in Firebase.'); settleAuth(); }
+      return;
+    }
+    if (user.isAnonymous) { setRole('customer'); settleAuth(); return; }
+
+    let r = null;
+    try { r = user.email ? await store.roleOf(user.email) : null; } catch (e) { console.error(e); }
+    if (r) {
+      setRole(r);
+      const card = $('#vendorAuth');
+      if (sessionStorage.getItem('eatongo_intent') && card && !card.classList.contains('hidden')) {
+        sessionStorage.removeItem('eatongo_intent');
+        screen('vendorPlace');
+      }
+    } else {
+      sessionStorage.removeItem('eatongo_intent');
+      const m = $('#vendorAuthMsg');
+      if (m) m.textContent = `${user.email} is not an approved vendor. Ask your admin to add this email.`;
+      toast('<b>Not authorised.</b> This account is not a vendor.');
+      await store.auth.signOut();                  // -> anonymous again
+    }
+    settleAuth();
+  }
+
+  const authForm = $('#vendorAuthForm');
+  if (authForm) authForm.onsubmit = async e => {
+    e.preventDefault();
+    const msg = $('#vendorAuthMsg'); if (msg) msg.textContent = '';
+    const s = store || await ready;
+    if (s.mode === 'local') { screen('vendorPlace'); return; }      // local test mode: no real login
+    const email = $('#vendorEmail').value.trim(), pass = $('#vendorPass').value;
+    sessionStorage.setItem('eatongo_intent', '1');
+    try { await s.signInEmail(email, pass); }
+    catch (err) {
+      console.error(err);
+      const m = {
+        'auth/invalid-credential': 'Wrong email or password.',
+        'auth/wrong-password': 'Wrong email or password.',
+        'auth/user-not-found': 'No account with this email. Ask your admin to create it.',
+        'auth/invalid-email': 'That email address looks invalid.',
+        'auth/too-many-requests': 'Too many attempts. Wait a few minutes and retry.',
+        'auth/operation-not-allowed': 'Email/Password sign-in is not enabled in Firebase yet.'
+      }[err.code] || 'Sign-in failed. Please try again.';
+      if (msg) msg.textContent = m;
+    }
+  };
+
+  function injectSignOut() {
+    const go = async () => { sessionStorage.removeItem('eatongo_vendor'); if (store.auth) await store.auth.signOut(); location.href = location.pathname + '?login'; };
+    const top = $('.ops-top');
+    if (top && !$('#signOutOps')) { const b = document.createElement('button'); b.id = 'signOutOps'; b.className = 'dashboard-launch'; b.style.marginLeft = '8px'; b.textContent = 'Sign out'; b.onclick = go; top.appendChild(b); }
+    const side = $('#vendorApp .side');
+    if (side && !$('#signOutSide')) { const b = document.createElement('button'); b.id = 'signOutSide'; b.className = 'navbtn'; b.innerHTML = '<span>⎋</span><span class="navlabel">Sign out</span>'; b.onclick = go; side.appendChild(b); }
+  }
+
+  /* ---------- admin panel: manage vendor emails ---------- */
+  function mountAdminPanel(on) {
+    let p = $('#adminPanel');
+    if (!on) { if (p) p.remove(); return; }
+    if (p) return;
+    p = document.createElement('div'); p.id = 'adminPanel'; p.className = 'panel'; p.style.marginTop = '16px';
+    p.innerHTML = '<div class="eyebrow">Admin only</div><h2>Vendor access</h2><p class="sub">Create their account in Firebase (Authentication → Users → Add user) first, then add their email here.</p><div class="scan-input" style="margin:12px 0"><input id="staffEmail" type="email" placeholder="vendor@gmail.com" style="text-transform:none"/><button id="staffAdd" type="button">Add vendor</button></div><div id="staffList"></div>';
+    $('#vpage-overview').appendChild(p);
+    $('#staffAdd').onclick = async () => {
+      const email = $('#staffEmail').value.trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('<b>Enter a valid email.</b>'); return; }
+      try { await store.setStaff(email, 'vendor'); $('#staffEmail').value = ''; toast('<b>Vendor added.</b> ' + esc(email)); }
+      catch (e) { console.error(e); toast('<b>Could not add.</b> Check database rules.'); }
+    };
+    p.addEventListener('click', async e => {
+      const b = e.target.closest('[data-staff-rm]'); if (!b) return;
+      try { await store.removeStaff(b.dataset.staffRm); toast('<b>Removed.</b>'); } catch (err) { toast('<b>Could not remove.</b>'); }
+    });
+    store.listStaff(map => {
+      const me = (store.auth.currentUser && store.auth.currentUser.email || '').toLowerCase();
+      $('#staffList').innerHTML = Object.entries(map).map(([k, v]) => {
+        const em = keyEmail(k);
+        return `<div class="history-row"><span><b>${esc(em)}</b><br><small>${esc(v)}</small></span>${em.toLowerCase() === me ? '<small>you</small>' : `<button class="status preparing" data-staff-rm="${esc(em)}">Remove</button>`}</div>`;
+      }).join('') || '<p class="sub">No vendors yet.</p>';
+    });
+  }
+
   /* ---------- customer: place order ---------- */
   document.addEventListener('click', e => {
     if (e.target.id !== 'checkoutBtn') return;
-    // existing handler closes the cart only when validation passed
-    if ($('#cartPanel').classList.contains('open')) return;
+    if ($('#cartPanel').classList.contains('open')) return;   // existing handler closes cart only if valid
     placeOrder();
   });
 
@@ -155,10 +273,13 @@ const FIREBASE_CONFIG = {
 
     try {
       store = store || await ready;
+      await authSettled;
+      const owner = store.uid();
+      if (!owner) throw new Error('Not signed in (enable Anonymous auth in Firebase)');
       const day = today();
       const [c, auth] = await Promise.all([store.counters(day), store.claimAuth(day)]);
       const order = {
-        id: 'HS-' + c.no, no: c.no, token: String(c.token), auth,
+        id: 'HS-' + c.no, no: c.no, token: String(c.token), auth, owner,
         customer: name, items, subtotal, total: Math.round(subtotal * 1.05),
         pickup: pre ? 'pre' : 'now',
         pickupTime: pre ? `${+preorderHour}:${preorderMinute} ${preorderPeriod}` : null,
@@ -167,6 +288,7 @@ const FIREBASE_CONFIG = {
       await store.save(order);
       mineId = order.id; lastMineStatus = 'new';
       sessionStorage.setItem('eatongo_order', mineId);
+      if (!isStaffRole()) { known = null; store.listenOne(mineId, onOrders); }
       paintMine(order);
       toast(`<b>Payment verified.</b> Token ${order.token} · Code #${order.auth}`);
     } catch (err) {
@@ -187,10 +309,8 @@ const FIREBASE_CONFIG = {
   /* ---------- vendor: render ---------- */
   const LABEL = { new: 'Accept', preparing: 'Mark ready', ready: 'Complete' };
   const LABEL_OPS = { new: 'Accept order', preparing: 'Mark ready', ready: 'Complete pickup' };
-  // Show the same customer-facing pickup token in every vendor queue.
-  // The internal order number remains available as o.no for backend lookup.
-  const row = o => `<div class="order-row"><div class="order-no">#${esc(o.token)}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div><button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button></div>`;
-  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${esc(o.token)}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button>`}</article>`;
+  const row = o => `<div class="order-row"><div class="order-no">#${o.no}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div><button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button></div>`;
+  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${o.no}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button>`}</article>`;
   const EMPTY_ROW = '<p class="sub" style="padding:14px">No orders here yet. New orders appear instantly.</p>';
   const EMPTY_CARD = '<div class="ops-empty"><b>No orders here</b>The next order will appear automatically.</div>';
 
@@ -202,7 +322,6 @@ const FIREBASE_CONFIG = {
     const live = byTab('live'), pre = byTab('pre'), done = byTab('completed');
     const active = orders.filter(o => o.status !== 'collected');
 
-    // phone order manager
     $$('[data-ops-tab]').forEach(b => {
       const t = b.dataset.opsTab;
       b.classList.toggle('active', t === opsTab);
@@ -211,10 +330,9 @@ const FIREBASE_CONFIG = {
     const opsList = byTab(opsTab);
     $('#opsOrderList').innerHTML = opsList.length ? opsList.map(card).join('') : EMPTY_CARD;
 
-    // dashboard
     $('#dashboardOrders').innerHTML = active.length ? active.slice(0, 3).map(row).join('') : EMPTY_ROW;
     const q = byTab(queueTab);
-    $('#fullQueue').innerHTML = q.length ? q.map(row).join('').replace(/<button class="status ready" data-oid="[^"]*">Complete<\/button>(?=<\/div>$)/, m => m) : EMPTY_ROW;
+    $('#fullQueue').innerHTML = q.length ? q.map(row).join('') : EMPTY_ROW;
     $$('#vpage-queue .tabs .tab').forEach((b, i) => {
       const t = ['live', 'pre', 'completed'][i];
       b.classList.toggle('active', t === queueTab);
@@ -223,7 +341,6 @@ const FIREBASE_CONFIG = {
     });
     const liveBadge = $('#vpage-queue .live'); if (liveBadge) liveBadge.textContent = `${active.length} active`;
 
-    // overview stats
     const td = orders.filter(o => o.day === today());
     const sales = td.reduce((a, o) => a + o.total, 0);
     const recent = orders.filter(o => Date.now() - o.createdAt < 15 * 60000).length;
@@ -240,11 +357,11 @@ const FIREBASE_CONFIG = {
   /* ---------- vendor: update order status ---------- */
   document.addEventListener('click', async e => {
     const b = e.target.closest('[data-oid]');
-    if (!b || b.disabled) return;
+    if (!b || b.disabled || !isStaffRole()) return;
     const o = orders.find(x => x.id === b.dataset.oid);
     if (!o || !NEXT[o.status]) return;
     b.disabled = true;
-    try { await (store || await ready).update(o.id, { status: NEXT[o.status], updatedAt: Date.now() }); }
+    try { await store.update(o.id, { status: NEXT[o.status], updatedAt: Date.now() }); }
     catch (err) { console.error(err); toast('<b>Update failed.</b> Try again.'); b.disabled = false; }
   });
 
@@ -266,7 +383,7 @@ const FIREBASE_CONFIG = {
   $('#tokenInput').placeholder = 'Order no., token or auth code';
   $('#tokenInput').addEventListener('keydown', e => { if (e.key === 'Enter') verify(); });
 
-  /* ---------- realtime listener (both sides) ---------- */
+  /* ---------- realtime listener ---------- */
   function beep() {
     try {
       const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain();
@@ -281,13 +398,12 @@ const FIREBASE_CONFIG = {
     orders = list.slice().sort((a, b) => a.createdAt - b.createdAt);
     renderVendor();
 
-    const vendorView = document.body.classList.contains('vendor-mode') || document.body.classList.contains('ops-mode');
-    if (vendorView) fresh.forEach(o => { toast(`<b>New order ${esc(o.id)}</b> · ${esc(o.customer)} · #${esc(o.auth)}`); beep(); });
+    if (isStaffRole() && inVendorView()) fresh.forEach(o => { toast(`<b>New order ${esc(o.id)}</b> · ${esc(o.customer)} · #${esc(o.auth)}`); beep(); });
 
     const mine = orders.find(o => o.id === mineId);
     if (mine) {
       paintMine(mine);
-      if (lastMineStatus && lastMineStatus !== mine.status) {
+      if (lastMineStatus && lastMineStatus !== mine.status && !isStaffRole()) {
         if (mine.status === 'preparing') toast('<b>Order accepted.</b> The kitchen is preparing it.');
         if (mine.status === 'ready') toast(`<b>Order ready!</b> Show code #${esc(mine.auth)} at the counter.`);
         if (mine.status === 'collected') toast('<b>Collected.</b> Enjoy your meal!');
@@ -296,11 +412,16 @@ const FIREBASE_CONFIG = {
     }
   }
 
-  const adv = $('#advanceCustomer'); if (adv) adv.style.display = 'none';   // real status now comes from the vendor
+  const adv = $('#advanceCustomer'); if (adv) adv.style.display = 'none';   // status now comes from the vendor
 
-  ready.then(s => { store = s; s.subscribe(onOrders); });
+  /* ---------- start ---------- */
+  ready.then(s => {
+    store = s; injectSignOut();
+    if (s.mode === 'local') { role = 'admin'; s.listenAll(onOrders); settleAuth(); return; }   // local test: no login
+    s.auth.onAuthStateChanged(onUser);
+  });
 
-  /* optional: run eatongoExport() in the console to download all data as orders.json */
+  /* optional: eatongoExport() in console downloads orders.json (staff only) */
   window.eatongoExport = async () => {
     const data = await (store || await ready).exportAll();
     const a = document.createElement('a');
