@@ -332,7 +332,13 @@
             window.location.href = window.location.pathname;
         });
     });
-    
+      document.querySelectorAll(".brand").forEach(brand => {
+      brand.style.cursor = "pointer";
+
+      brand.addEventListener("click", () => {
+          window.location.href = window.location.pathname;
+      });
+  });
   </script>
 </body>
 </html>
