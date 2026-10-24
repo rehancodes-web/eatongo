@@ -5,7 +5,7 @@
            admin    = email/password account listed in  staff/<email> = "admin"  (can add/remove vendors)  */
 (() => {
   'use strict';
-  console.log('eatongo backend build 8');
+  console.log('eatongo backend build 9');
 
   /* ====== FIREBASE CONFIG (leave databaseURL empty = local test mode, no login) ====== */
   const FIREBASE_CONFIG = {
@@ -44,6 +44,7 @@
     addEventListener('storage', e => { if (e.key === K) emit(); });
     return {
       mode: 'local',
+      async saveProfile() {}, async getProfile() { return null; }, async setLastOrder() {},
       uid: () => 'local',
       async counters(day) {
         const d = read(), m = d.meta || {};
@@ -115,6 +116,9 @@
       removeStaff: email => db.ref('staff/' + emailKey(email)).remove(),
       signInEmail: (email, pass) => auth.signInWithEmailAndPassword(email, pass),
       createUserEmail: (email, pass) => auth.createUserWithEmailAndPassword(email, pass),
+      saveProfile: (uid, p) => db.ref('customers/' + uid).update(p),
+      getProfile: async uid => (await db.ref('customers/' + uid).once('value')).val(),
+      setLastOrder: (uid, id) => db.ref('customers/' + uid + '/lastOrder').set(id),
       async exportAll() { return { orders: (await db.ref('orders').once('value')).val() }; }
     };
   }
@@ -161,15 +165,47 @@
       if (inVendorView()) { kickToLogin(); return; }
       if (mineId) store.listenOne(mineId, onOrders);
       renderVendor();
-    } else if (sessionStorage.getItem('eatongo_customer_intent')) {
-      sessionStorage.removeItem('eatongo_customer_intent');
-      setRole('customer');
-      if (typeof startScanner === 'function') startScanner();
     } else {
       sessionStorage.setItem('eatongo_vendor', '1');
       store.listenAll(onOrders);
       mountAdminPanel(r === 'admin' && store.mode === 'firebase');
     }
+  }
+
+  /* ---------- registered customers ---------- */
+  let lastCustomerUid = null;
+  async function enterCustomer(user) {
+    lastCustomerUid = user.uid;
+    setRole('customer');
+    try {
+      const p = await store.getProfile(user.uid);
+      if (p) {
+        if (p.name) sessionStorage.setItem('eatongoCustomerName', p.name);
+        if (p.lastOrder && !mineId) { mineId = p.lastOrder; sessionStorage.setItem('eatongo_order', mineId); store.listenOne(mineId, onOrders); }
+      }
+    } catch (e) { console.error(e); }
+    refreshCustomerBadge();
+    if (sessionStorage.getItem('eatongo_customer_intent')) {
+      sessionStorage.removeItem('eatongo_customer_intent');
+      if (typeof startScanner === 'function') startScanner();
+    }
+  }
+
+  function refreshCustomerBadge() {
+    const u = store && store.auth && store.auth.currentUser;
+    let btn = $('#custLogout');
+    if (!(u && !u.isAnonymous && role === 'customer')) { if (btn) btn.remove(); return; }
+    if (!btn) {
+      btn = document.createElement('button'); btn.id = 'custLogout';
+      btn.style.cssText = 'margin-left:auto;background:#d8ff3e;color:#171717;border:0;border-radius:99px;padding:8px 12px;font-weight:850;font-size:.78rem';
+      btn.onclick = async () => {
+        sessionStorage.removeItem('eatongo_order'); sessionStorage.removeItem('eatongoCustomerName');
+        await store.auth.signOut(); location.href = location.pathname;
+      };
+      $('.topbar').appendChild(btn);
+    }
+    const n = sessionStorage.getItem('eatongoCustomerName') || '';
+    btn.textContent = 'Log out' + (n ? ' · ' + n.slice(0, 12) : '');
   }
 
   async function onUser(user) {
@@ -178,11 +214,11 @@
       catch (e) { console.error(e); toast('<b>Setup needed.</b> Enable Anonymous sign-in in Firebase.'); settleAuth(); }
       return;
     }
-    if (user.isAnonymous) { setRole('customer'); settleAuth(); return; }
+    if (user.isAnonymous) { setRole('customer'); refreshCustomerBadge(); settleAuth(); return; }
 
     let r = null;
     try { r = user.email ? await store.roleOf(user.email) : null; } catch (e) { console.error(e); }
-    if (r) {
+    if (r && !sessionStorage.getItem('eatongo_customer_intent')) {   // staff (unless they used the customer sign-in)
       setRole(r);
       staffEmail = (user.email || '').toLowerCase();
       const card = $('#vendorAuth');
@@ -190,12 +226,14 @@
         if (sessionStorage.getItem('eatongo_intent')) { sessionStorage.removeItem('eatongo_intent'); screen('vendorPlace'); }
         else openVendorOps();                       // already signed in from before: go straight in
       }
-    } else {
+    } else if (!r && sessionStorage.getItem('eatongo_intent')) {      // tried the vendor sign-in but is not staff
       sessionStorage.removeItem('eatongo_intent');
       const m = $('#vendorAuthMsg');
       if (m) m.textContent = `${user.email} is not an approved vendor. Ask your admin to add this email.`;
       toast('<b>Not authorised.</b> This account is not a vendor.');
       await store.auth.signOut();                  // -> anonymous again
+    } else {
+      await enterCustomer(user);                   // registered customer
     }
     settleAuth();
   }
@@ -255,16 +293,65 @@
     catch(err){if(msg)msg.textContent=err.code==='auth/email-already-in-use'?'Account already exists. Use Sign in.':'Could not create the account. Check the authorised email.';}
   };
 
+  /* customer register / log in */
+  let custMode = 'register';
+  const custMsg = (t, bad) => { const m = $('#customerAuthMsg'); if (m) { m.style.color = bad ? '#a43d32' : '#5d625b'; m.textContent = t; } };
+  function setCustMode(m) {
+    custMode = m;
+    const reg = m === 'register';
+    $('#custTitle').textContent = reg ? 'Create your account' : 'Welcome back';
+    $('#custSub').textContent = reg ? 'Pick a username, email and password. Next time, just log in with your email and password.' : 'Log in with the email and password you registered with.';
+    $('#custNameField').classList.toggle('hidden', !reg);
+    $('#customerName').required = reg;
+    $('#customerPass').autocomplete = reg ? 'new-password' : 'current-password';
+    $('#custSubmit').textContent = reg ? 'Register' : 'Log in';
+    $('#custToggle').textContent = reg ? 'Already registered? Log in' : 'New here? Register';
+    custMsg('');
+  }
+  if ($('#custToggle')) { $('#custToggle').onclick = () => setCustMode(custMode === 'register' ? 'login' : 'register'); setCustMode('register'); }
+
   const customerForm = $('#customerNameForm');
   if (customerForm) customerForm.onsubmit = async e => {
     e.preventDefault();
-    const name=$('#customerName').value.trim(), email=$('#customerEmail')?.value.trim().toLowerCase(), pass=$('#customerPass')?.value;
-    if (!name || !email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !pass || pass.length<6) { toast('<b>Enter a valid email and a password of at least 6 characters.</b>'); return; }
-    sessionStorage.setItem('eatongoCustomerName',name); sessionStorage.setItem('eatongo_customer_intent','1');
-    const s=store||await ready;
-    if(s.mode==='local'){startScanner();return;}
-    try { try { await s.createUserEmail(email,pass); } catch(err) { if(err.code==='auth/email-already-in-use') await s.signInEmail(email,pass); else throw err; } }
-    catch(err){sessionStorage.removeItem('eatongo_customer_intent');toast('<b>Could not create or sign in.</b> Check your details.');}
+    const name = $('#customerName').value.trim(), email = $('#customerEmail').value.trim().toLowerCase(), pass = $('#customerPass').value;
+    const reg = custMode === 'register';
+    if (reg && (name.length < 2 || name.length > 30)) { custMsg('Username must be 2 to 30 characters.', true); return; }
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { custMsg('Enter a valid email.', true); return; }
+    if (pass.length < 6) { custMsg('Password must be at least 6 characters.', true); return; }
+
+    const s = store || await ready;
+    if (s.mode === 'local') { sessionStorage.setItem('eatongoCustomerName', name || email); startScanner(); return; }
+
+    const btn = $('#custSubmit'); btn.disabled = true; custMsg(reg ? 'Creating your account…' : 'Logging in…');
+    await Promise.race([authSettled, new Promise(r => setTimeout(r, 4000))]);   // let the silent guest sign-in finish first
+    sessionStorage.removeItem('eatongo_intent');
+    sessionStorage.setItem('eatongo_customer_intent', '1');
+    if (reg) sessionStorage.setItem('eatongoCustomerName', name);
+    try {
+      let user;
+      if (reg) {
+        user = (await s.createUserEmail(email, pass)).user;
+        await s.saveProfile(user.uid, { name, email, createdAt: Date.now() }).catch(err => console.error(err));
+      } else {
+        user = (await s.signInEmail(email, pass)).user;
+        if (user.uid === lastCustomerUid) await enterCustomer(user);   // already signed in: no auth event will fire
+      }
+    } catch (err) {
+      console.error(err);
+      sessionStorage.removeItem('eatongo_customer_intent');
+      custMsg({
+        'auth/email-already-in-use': 'This email is already registered. Tap "Already registered? Log in".',
+        'auth/invalid-credential': 'Wrong email or password.',
+        'auth/wrong-password': 'Wrong email or password.',
+        'auth/user-not-found': 'No account with this email. Tap "New here? Register".',
+        'auth/weak-password': 'Password is too weak. Use at least 6 characters.',
+        'auth/invalid-email': 'That email address looks invalid.',
+        'auth/too-many-requests': 'Too many attempts. Wait a few minutes and retry.',
+        'auth/network-request-failed': 'Network problem reaching Firebase. Retry.',
+        'auth/operation-not-allowed': 'Email/Password sign-in is not enabled in Firebase.',
+        'auth/admin-restricted-operation': 'Sign-ups are switched off in Firebase (Authentication → Settings → User actions).'
+      }[err.code] || `Something went wrong (${err.code || err.message}).`, true);
+    } finally { btn.disabled = false; }
   };
 
   function injectSignOut() {
@@ -341,6 +428,7 @@
         status: 'new', paid: true, createdAt: Date.now(), day
       };
       await store.save(order);
+      const cu = store.auth && store.auth.currentUser; if (cu && !cu.isAnonymous) store.setLastOrder(cu.uid, order.id).catch(() => {});
       mineId = order.id; lastMineStatus = 'new';
       sessionStorage.setItem('eatongo_order', mineId);
       if (!isStaffRole()) { known = null; store.listenOne(mineId, onOrders); }

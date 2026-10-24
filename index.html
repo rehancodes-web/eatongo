@@ -118,13 +118,17 @@
     </div>
     <div class="auth-card hidden" id="customerNamePrompt">
       <button class="back" id="backCustomerName" type="button">← Back</button>
-      <div class="eyebrow">Customer demo</div>
-      <h1>What should we call you?</h1>
-      <p>Enter your name so we can personalise this demo journey. You can connect this field to your backend later.</p>
+      <div class="eyebrow">Customer</div>
+      <h1 id="custTitle">Create your account</h1>
+      <p id="custSub">Pick a username, email and password. Next time, just log in with your email and password.</p>
       <form id="customerNameForm">
-        <div class="field"><label for="customerName">Your name</label><input id="customerName" name="customerName" autocomplete="name" placeholder="e.g. Rehan" required /></div><div class="field"><label for="customerEmail">Email</label><input id="customerEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></div><div class="field"><label for="customerPass">Password</label><input id="customerPass" type="password" minlength="6" autocomplete="new-password" required placeholder="At least 6 characters" /></div>
-        <button class="primary dark" type="submit">Continue to scan</button>
+        <div class="field" id="custNameField"><label for="customerName">Username</label><input id="customerName" name="customerName" autocomplete="username" placeholder="e.g. Rehan" maxlength="30" required /></div>
+        <div class="field"><label for="customerEmail">Email</label><input id="customerEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></div>
+        <div class="field"><label for="customerPass">Password</label><input id="customerPass" type="password" minlength="6" autocomplete="new-password" required placeholder="At least 6 characters" /></div>
+        <button class="primary dark" type="submit" id="custSubmit">Register</button>
       </form>
+      <p id="customerAuthMsg" class="cart-note" style="margin-top:12px"></p>
+      <button class="back" id="custToggle" type="button" style="display:block;margin:6px auto 0">Already registered? Log in</button>
     </div>
     <div class="auth-card hidden" id="vendorAuth">
       <button class="back" data-back-role>← Back</button><div class="setup-steps"><span class="done"></span><span></span><span></span></div><div class="eyebrow">Vendor access</div><h1>Sign in to your outlet</h1><p>Sign in with the email and password your outlet admin created for you.</p><form id="vendorAuthForm"><div class="field"><label for="vendorEmail">Email</label><input id="vendorEmail" type="email" autocomplete="username" required placeholder="you@example.com" /></div><div class="field"><label for="vendorOutlet">Where do you work?</label><select id="vendorOutlet" required><option value="HARI-001">Hari Super Sandwich</option><option value="MING-001">Mingos</option></select></div><div class="field"><label for="vendorPass">Password</label><input id="vendorPass" type="password" autocomplete="current-password" required /></div><button class="primary dark" type="submit">Sign in</button><button class="back" id="vendorCreateAccount" type="button">First time? Set your password</button></form><p id="vendorAuthMsg" class="cart-note" style="margin-top:12px;color:#a43d32"></p>
@@ -387,7 +391,7 @@
         });
     });
   </script>
-  <script src="backend.js?v=8"></script>
+  <script src="backend.js?v=9"></script>
 </body>
 </html>
 
