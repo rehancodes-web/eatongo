@@ -323,6 +323,9 @@
   function paintMine(o) {
     $('.pass-token').textContent = o.token;
     $('.pass-auth').textContent = '#' + o.auth;
+    let tag = $('#passOrderNo');
+    if (!tag) { tag = document.createElement('div'); tag.id = 'passOrderNo'; tag.className = 'pass-daily'; tag.style.marginTop = '10px'; $('.pass-identity').appendChild(tag); }
+    tag.textContent = `Order ${o.id} · ${o.customer}` + (o.status === 'collected' ? ' · Collected' : '');
     $('#trackingSummary').textContent = `Order ${o.id} · ` +
       (o.pickup === 'pre' ? `Pre-order pickup today at ${o.pickupTime}` : 'Estimated pickup in ~8 minutes');
     statusIndex = FLOW_INDEX[o.status] ?? 0; renderFlow();
@@ -434,6 +437,7 @@
     }
   }
 
+  $('.pass-token').textContent = '…'; $('.pass-auth').textContent = '…';   // no stale demo values until a real order loads
   const adv = $('#advanceCustomer'); if (adv) adv.style.display = 'none';   // status now comes from the vendor
 
   /* ---------- start ---------- */
