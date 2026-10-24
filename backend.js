@@ -5,6 +5,7 @@
            admin    = email/password account listed in  staff/<email> = "admin"  (can add/remove vendors)  */
 (() => {
   'use strict';
+  console.log('eatongo backend build 8');
 
   /* ====== FIREBASE CONFIG (leave databaseURL empty = local test mode, no login) ====== */
   const FIREBASE_CONFIG = {
@@ -122,7 +123,10 @@
     try { return USE_FIREBASE ? await firebaseStore() : localStore(); }
     catch (e) {
       console.error(e);
-      setTimeout(() => toast('<b>Backend error.</b> Check Firebase config. Using local test mode.'), 500);
+      const bar = document.createElement('div');
+      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#e44d4d;color:#fff;font:700 13px system-ui;padding:8px 12px;text-align:center';
+      bar.textContent = 'OFFLINE TEST MODE: Firebase failed to load. Orders on this device will NOT reach the vendor.';
+      document.body.appendChild(bar);
       return localStore();
     }
   })();
@@ -140,7 +144,7 @@
   const isPre = o => !['collected','declined'].includes(o.status) && o.pickup === 'pre';
   const isDone = o => ['collected','declined'].includes(o.status);
   const itemsText = o => (o.items || []).map(i => `${esc(i.name)} × ${i.qty}`).join(', ');
-  const metaText = o => `${esc(o.customer)} · ₹${o.total} · Paid · ${timeStr(o.createdAt)}${o.pickup === 'pre' ? ' · Pre-order ' + esc(o.pickupTime) : ''}`;
+  const metaText = o => `${esc(o.id)} · ${esc(o.customer)} · ₹${o.total} · Paid · ${timeStr(o.createdAt)}${o.pickup === 'pre' ? ' · Pre-order ' + esc(o.pickupTime) : ''}`;
 
   /* ---------- roles / login ---------- */
   function inVendorView() { return document.body.classList.contains('vendor-mode') || document.body.classList.contains('ops-mode'); }
@@ -363,8 +367,8 @@
   /* ---------- vendor: render ---------- */
   const LABEL = { new: 'Accept', preparing: 'Mark ready', ready: 'Complete' };
   const LABEL_OPS = { new: 'Accept order', preparing: 'Mark ready', ready: 'Complete pickup' };
-  const row = o => `<div class="order-row"><div class="order-no">#${o.no}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div><button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button></div>`;
-  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${o.no}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button><button class="status" style="margin-left:8px;background:#ffe5e2;color:#a43d32" data-decline="${esc(o.id)}">Decline order</button>`}</article>`;
+  const row = o => `<div class="order-row"><div class="order-no"><small style="display:block;font-size:.6rem;opacity:.7;letter-spacing:.08em">TOKEN</small>${esc(o.token)}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div>${LABEL[o.status] ? `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button>` : `<button class="status ready" disabled>${o.status === 'declined' ? 'Declined' : 'Collected ✓'}</button>`}</div>`;
+  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">Token ${esc(o.token)}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : o.status === 'declined' ? '<button class="status" disabled style="background:#ffe5e2;color:#a43d32">Declined</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button><button class="status" style="margin-left:8px;background:#ffe5e2;color:#a43d32" data-decline="${esc(o.id)}">Decline order</button>`}</article>`;
   const EMPTY_ROW = '<p class="sub" style="padding:14px">No orders here yet. New orders appear instantly.</p>';
   const EMPTY_CARD = '<div class="ops-empty"><b>No orders here</b>The next order will appear automatically.</div>';
 
