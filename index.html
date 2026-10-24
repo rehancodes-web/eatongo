@@ -234,6 +234,98 @@
     function stopCamera(){clearTimeout(scanTimer);if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null}}
     document.querySelector('#chooseCustomer').onclick=()=>screen('customerNamePrompt');document.querySelector('#chooseVendor').onclick=()=>screen('vendorAuth');document.querySelector('#backCustomerName').onclick=()=>screen('roleStep');document.querySelector('#customerNameForm').onsubmit=e=>{e.preventDefault();const name=document.querySelector('#customerName').value.trim();if(!name)return;sessionStorage.setItem('eatongoCustomerName',name);startScanner()};document.querySelector('[data-back-role]').onclick=()=>screen('roleStep');document.querySelector('[data-back-auth]').onclick=()=>screen('vendorAuth');document.querySelector('[data-back-place]').onclick=()=>screen('vendorPlace');document.querySelector('#vendorAuthForm').onsubmit=e=>{e.preventDefault();screen('vendorPlace')};document.querySelector('#vendorPlaceForm').onsubmit=e=>{e.preventDefault();screen('vendorMenuSetup')};document.querySelector('#finishVendor').onclick=()=>{openVendorOps();toast('<b>Outlet ready.</b> Menu published and orders are live.')};document.querySelector('#openDashboard').onclick=()=>unlock(true);document.querySelector('#menuFile').onchange=e=>{if(e.target.files[0])toast('<b>Menu uploaded.</b> '+e.target.files[0].name+' is ready to review.')};document.querySelector('#scannerBack').onclick=()=>{stopCamera();document.querySelector('#customerScanner').classList.add('hidden');document.querySelector('#onboarding').classList.remove('hidden');screen('roleStep')};document.querySelector('#demoScan').onclick=()=>{stopCamera();unlock(false);toast('<b>Hari Super Sandwich found.</b> Live menu loaded.')};document.querySelector('#manualCode').onclick=()=>{const code=prompt('Enter outlet code','HARI-001');if(code&&code.trim().toUpperCase()==='HARI-001'){stopCamera();unlock(false);toast('<b>Outlet verified.</b> Live menu loaded.')}};
     function role(vendor){document.body.classList.toggle('vendor-mode',vendor);document.querySelector('#customerApp').classList.toggle('hidden',vendor);document.querySelector('#vendorApp').classList.toggle('hidden',!vendor);document.querySelector('#customerRole').classList.toggle('active',!vendor);document.querySelector('#vendorRole').classList.toggle('active',vendor)}document.querySelector('#customerRole').onclick=()=>role(false);document.querySelector('#vendorRole').onclick=()=>role(true);renderCart();const scannedOutlet=new URLSearchParams(location.search).get('outlet');if(scannedOutlet?.toUpperCase()==='HARI-001'){unlock(false);showPage('menu');setTimeout(()=>toast('<b>Hari Super Sandwich found.</b> Live menu loaded.'),250)}
+
+    /* ===== eatongo URL routing — paste at the very end of your main script =====
+       /                       role select
+       ?customer               customer name step
+       ?scan                   QR scanner
+       ?login | ?login=place | ?login=menu      vendor sign-in steps
+       ?res_id=00              restaurant (customer)   + &page=tracking|rewards|orders
+       ?vendor=orders          vendor order manager (phone view)
+       ?vendor=overview        vendor dashboard        (queue|verify|menu|loyalty|analytics)
+       (works on GitHub Pages, survives refresh, back/forward buttons work)                     */
+    (()=>{
+      const OUTLETS={'00':{code:'HARI-001',name:'Hari Super Sandwich'}};
+      const $=s=>document.querySelector(s);
+      let res='00',applying=false;
+      const og={showPage,showVPage,screen,unlock,role,startScanner,stopCamera,openVendorOps};
+      const flag=v=>{try{if(v)sessionStorage.setItem('eatongo_vendor','1');return sessionStorage.getItem('eatongo_vendor')==='1'}catch(e){return !!v}};
+      const customerQS=()=>{const p=document.querySelector('.page:not(.hidden)'),n=p?p.id.replace('page-',''):'menu';return 'res_id='+res+(n!=='menu'?'&page='+n:'')};
+      const vendorQS=()=>{const p=document.querySelector('.vpage:not(.hidden)'),n=p?p.id.replace('vpage-',''):'overview';return 'vendor='+n};
+      function setTitle(){
+        const q=new URLSearchParams(location.search);let t='';
+        if(q.has('res_id')&&OUTLETS[q.get('res_id')])t=OUTLETS[q.get('res_id')].name;
+        else if(q.get('vendor')==='orders')t='Vendor orders';
+        else if(q.has('vendor'))t='Vendor dashboard';
+        else if(q.has('login'))t='Vendor sign in';
+        else if(q.has('scan'))t='Scan QR';
+        document.title=t?t+' · eatongo':'eatongo';
+      }
+      function go(qs){
+        if(applying)return;
+        const url=location.pathname+(qs?'?'+qs:'');
+        if(url!==location.pathname+location.search)history.pushState(null,'',url);
+        setTitle();
+      }
+      function lock(){
+        document.body.classList.remove('ops-mode');
+        document.body.classList.add('locked');
+        $('#vendorOps').classList.add('hidden');
+        $('#onboarding').classList.remove('hidden');
+        $('#customerScanner').classList.add('hidden');
+        og.role(false);
+      }
+      /* wrap the existing navigation functions: same behaviour + URL update */
+      window.showPage=n=>{og.showPage(n);go(customerQS())};
+      window.showVPage=n=>{og.showVPage(n);go(vendorQS())};
+      window.screen=id=>{og.screen(id);go({roleStep:'',customerNamePrompt:'customer',vendorAuth:'login',vendorPlace:'login=place',vendorMenuSetup:'login=menu'}[id])};
+      window.startScanner=async()=>{go('scan');return og.startScanner()};
+      window.openVendorOps=()=>{og.openVendorOps();if(!applying)flag(true);go('vendor=orders')};
+      window.role=v=>{
+        og.role(v);
+        if(document.body.classList.contains('locked'))return;
+        if(v&&!applying)flag(true);
+        go(v?vendorQS():customerQS());
+      };
+
+      function apply(){
+        const q=new URLSearchParams(location.search);
+        applying=true;
+        try{
+          og.stopCamera();
+          $('#pickupPass').classList.add('hidden');
+          $('#cartPanel').classList.remove('open');
+          if(q.get('outlet')&&q.get('outlet').toUpperCase()==='HARI-001')history.replaceState(null,'',location.pathname+'?res_id=00'),q.set('res_id','00');   // old ?outlet= QR links still work
+          if(q.has('res_id')){
+            const id=q.get('res_id');
+            if(OUTLETS[id]){
+              res=id;og.unlock(false);
+              const pg=q.get('page');
+              og.showPage(pg&&document.getElementById('page-'+pg)?pg:'menu');
+            }else{
+              lock();og.screen('roleStep');history.replaceState(null,'',location.pathname);
+              toast('<b>Outlet not found.</b> Scan a valid eatongo QR.');
+            }
+          }else if(q.has('vendor')&&flag()){
+            const v=q.get('vendor');
+            if(v==='orders')og.openVendorOps();
+            else{og.unlock(true);og.showVPage(v&&document.getElementById('vpage-'+v)?v:'overview')}
+          }else if(q.has('vendor')){
+            lock();og.screen('vendorAuth');history.replaceState(null,'',location.pathname+'?login');
+          }else if(q.has('scan')){
+            lock();og.startScanner();
+          }else if(q.has('customer')){
+            lock();og.screen('customerNamePrompt');
+          }else if(q.has('login')){
+            lock();og.screen({place:'vendorPlace',menu:'vendorMenuSetup'}[q.get('login')]||'vendorAuth');
+          }else{
+            lock();og.screen('roleStep');
+          }
+        }finally{applying=false;setTitle()}
+      }
+      window.addEventListener('popstate',apply);
+      apply();
+    })();
   </script>
 </body>
 </html>
