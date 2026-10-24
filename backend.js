@@ -75,7 +75,7 @@
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-app-compat.js`);
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-auth-compat.js`);
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-database-compat.js`);
-    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    firebase.initializeApp(FIREBASE_CONFIG);
     const db = firebase.database(), auth = firebase.auth();
     let off = null;
     const stop = () => { if (off) { off(); off = null; } };
@@ -127,7 +127,7 @@
   })();
 
   /* ---------- state ---------- */
-  let store = null, orders = [], known = null, role = 'customer';
+  let store = null, orders = [], known = null, role = 'customer', staffEmail = '';
   let mineId = sessionStorage.getItem('eatongo_order') || null, lastMineStatus = null;
   let opsTab = 'live', queueTab = 'live';
   let settleAuth; const authSettled = new Promise(r => { settleAuth = r; });
@@ -174,10 +174,11 @@
     try { r = user.email ? await store.roleOf(user.email) : null; } catch (e) { console.error(e); }
     if (r) {
       setRole(r);
+      staffEmail = (user.email || '').toLowerCase();
       const card = $('#vendorAuth');
-      if (sessionStorage.getItem('eatongo_intent') && card && !card.classList.contains('hidden')) {
-        sessionStorage.removeItem('eatongo_intent');
-        screen('vendorPlace');
+      if (card && !card.classList.contains('hidden')) {
+        if (sessionStorage.getItem('eatongo_intent')) { sessionStorage.removeItem('eatongo_intent'); screen('vendorPlace'); }
+        else openVendorOps();                       // already signed in from before: go straight in
       }
     } else {
       sessionStorage.removeItem('eatongo_intent');
@@ -192,23 +193,44 @@
   const authForm = $('#vendorAuthForm');
   if (authForm) authForm.onsubmit = async e => {
     e.preventDefault();
-    const msg = $('#vendorAuthMsg'); if (msg) msg.textContent = '';
+    const msg = $('#vendorAuthMsg'); if (msg) { msg.style.color = '#5d625b'; msg.textContent = 'Signing in…'; }
     const s = store || await ready;
     if (s.mode === 'local') { screen('vendorPlace'); return; }      // local test mode: no real login
     const email = $('#vendorEmail').value.trim(), pass = $('#vendorPass').value;
     sessionStorage.setItem('eatongo_intent', '1');
-    try { await s.signInEmail(email, pass); }
+    const btn = authForm.querySelector('button[type=submit]'); if (btn) btn.disabled = true;
+    // wait for the silent anonymous sign-in to finish first, so it can't overwrite this login
+    await Promise.race([authSettled, new Promise(r => setTimeout(r, 4000))]);
+    try {
+      try { await s.signInEmail(email, pass); }
+      catch (e1) {                                   // one automatic retry on flaky network
+        if (e1.code === 'auth/network-request-failed' || e1.code === 'auth/internal-error') { await new Promise(r => setTimeout(r, 800)); await s.signInEmail(email, pass); }
+        else throw e1;
+      }
+    }
     catch (err) {
       console.error(err);
+      if (msg) msg.style.color = '#a43d32';
       const m = {
         'auth/invalid-credential': 'Wrong email or password.',
         'auth/wrong-password': 'Wrong email or password.',
         'auth/user-not-found': 'No account with this email. Ask your admin to create it.',
         'auth/invalid-email': 'That email address looks invalid.',
         'auth/too-many-requests': 'Too many attempts. Wait a few minutes and retry.',
+        'auth/network-request-failed': 'Network problem reaching Firebase. Check your connection and retry.',
         'auth/operation-not-allowed': 'Email/Password sign-in is not enabled in Firebase yet.'
-      }[err.code] || 'Sign-in failed. Please try again.';
+      }[err.code] || `Sign-in failed (${err.code || err.message}). Please try again.`;
       if (msg) msg.textContent = m;
+      if (btn) btn.disabled = false;
+      return;
+    }
+    if (btn) btn.disabled = false;
+    // same user was already signed in -> Firebase fires no auth event, so continue here
+    const u = s.auth.currentUser;
+    if (u && !u.isAnonymous && isStaffRole() && (u.email || '').toLowerCase() === staffEmail) {
+      sessionStorage.removeItem('eatongo_intent'); screen('vendorPlace');
+    } else {
+      setTimeout(() => { const c = $('#vendorAuth'); if (c && !c.classList.contains('hidden') && msg && msg.textContent === 'Signing in…') msg.textContent = 'Signed in, but could not load your vendor access. Press F12 → Console and send me the red error.'; }, 6000);
     }
   };
 
@@ -309,8 +331,8 @@
   /* ---------- vendor: render ---------- */
   const LABEL = { new: 'Accept', preparing: 'Mark ready', ready: 'Complete' };
   const LABEL_OPS = { new: 'Accept order', preparing: 'Mark ready', ready: 'Complete pickup' };
-  const row = o => `<div class="order-row"><div class="order-no">#${esc(o.token ?? o.no)}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div><button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button></div>`;
-  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${esc(o.token ?? o.no)}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button>`}</article>`;
+  const row = o => `<div class="order-row"><div class="order-no">#${o.no}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div><button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button></div>`;
+  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${o.no}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button>`}</article>`;
   const EMPTY_ROW = '<p class="sub" style="padding:14px">No orders here yet. New orders appear instantly.</p>';
   const EMPTY_CARD = '<div class="ops-empty"><b>No orders here</b>The next order will appear automatically.</div>';
 
@@ -393,7 +415,6 @@
   }
 
   function onOrders(list) {
-    list = (Array.isArray(list) ? list : []).filter(o => o && o.id && o.createdAt);
     const fresh = known === null ? [] : list.filter(o => !known.has(o.id));
     known = new Set(list.map(o => o.id));
     orders = list.slice().sort((a, b) => a.createdAt - b.createdAt);
@@ -422,20 +443,7 @@
     s.auth.onAuthStateChanged(onUser);
   });
 
-  // Expose the same live order data used by the vendor dashboard for analytics.
-  // This keeps daily/weekly/monthly summaries tied to real orders instead of
-  // requiring a second data source in the UI.
-  window.eatongoAnalytics = function(period = 'daily') {
-    const now = Date.now(), dayMs = 86400000;
-    const cutoff = period === 'monthly' ? now - 30 * dayMs : period === 'weekly' ? now - 7 * dayMs : now - dayMs;
-    const scoped = orders.filter(o => Number(o.createdAt) >= cutoff);
-    const itemTotals = {};
-    scoped.forEach(o => (o.items || []).forEach(i => { itemTotals[i.name] = (itemTotals[i.name] || 0) + Number(i.qty || 0); }));
-    const top = Object.entries(itemTotals).sort((a, b) => b[1] - a[1])[0] || ['No sales yet', 0];
-    return { period, orderCount: scoped.length, totalSales: scoped.reduce((sum, o) => sum + Number(o.total || 0), 0), topItem: top[0], topItemQty: top[1], orders: scoped };
-  };
-
-  /* optional: run eatongoExport() in the console to download all data as orders.json */
+  /* optional: eatongoExport() in console downloads orders.json (staff only) */
   window.eatongoExport = async () => {
     const data = await (store || await ready).exportAll();
     const a = document.createElement('a');
