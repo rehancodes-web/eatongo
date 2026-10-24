@@ -102,7 +102,7 @@
     .summary-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 12px}.summary-tabs button{border:2px solid var(--ink);background:white;color:var(--ink);border-radius:99px;padding:9px 16px;font-weight:850;cursor:pointer}.summary-tabs button.active{background:var(--lime);box-shadow:3px 3px 0 var(--ink)}.summary-card{background:var(--ink);color:white;border-radius:17px;padding:20px;margin-top:14px}.summary-card h2{margin:0 0 5px}.summary-card p{color:#c8cec2;margin:0 0 15px}.summary-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.summary-metric{background:#2a2e27;border:1px solid #41463c;border-radius:12px;padding:12px}.summary-metric small{display:block;color:#b7beb0}.summary-metric strong{display:block;font-size:1.3rem;margin-top:5px;color:var(--lime)}.day-badge{display:inline-flex;align-items:center;gap:6px;background:var(--lime);color:var(--ink);border-radius:99px;padding:7px 12px;font-weight:850;margin-top:4px}.weekday-panel{margin-top:16px;background:white;color:var(--ink);border:1px solid var(--line);border-radius:17px;padding:18px}.weekday-panel h2{margin:0 0 5px}.weekday-panel p{color:var(--muted);margin:0 0 14px;font-size:.84rem}.weekday-grid{min-width:720px;display:grid;grid-template-columns:120px repeat(7,1fr);gap:7px;align-items:center}.weekday-grid .day,.weekday-grid .slot{font-size:.74rem;font-weight:800}.weekday-grid .slot{text-align:center;color:var(--muted)}.day-cell{height:34px;border-radius:8px;background:#eef1e9;display:grid;place-items:center;font-size:.72rem;font-weight:850;color:var(--ink)}.day-cell.busy{background:var(--orange);color:white}.day-cell.medium{background:var(--lime2)}.weekday-note{margin-top:14px;padding:11px 13px;border-radius:11px;background:#f0eaff;color:#4f3cad;font-size:.82rem;font-weight:750}
     .go-cart{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);width:min(456px,calc(100vw - 28px));z-index:70;border:2px solid #171717;background:#d8ff3e;color:#171717;border-radius:14px;padding:14px 20px;font-size:1rem;font-weight:900;box-shadow:4px 5px 0 #171717}.go-cart.hidden{display:none!important}
     @media(max-width:780px){.insight-grid{grid-template-columns:1fr}.summary-metrics{grid-template-columns:repeat(2,1fr)}.summary-card{padding:16px}.summary-metric strong{font-size:1.05rem}}
-  </style>
+  body.restricted-vendor .stat:first-child,body.restricted-vendor [data-vpage="menu"]{display:none!important;} </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';document.head.appendChild(s)"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 </head>
@@ -122,12 +122,12 @@
       <h1>What should we call you?</h1>
       <p>Enter your name so we can personalise this demo journey. You can connect this field to your backend later.</p>
       <form id="customerNameForm">
-        <div class="field"><label for="customerName">Your name</label><input id="customerName" name="customerName" autocomplete="name" placeholder="e.g. Rehan" required /></div>
+        <div class="field"><label for="customerName">Your name</label><input id="customerName" name="customerName" autocomplete="name" placeholder="e.g. Rehan" required /></div><div class="field"><label for="customerEmail">Email</label><input id="customerEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></div><div class="field"><label for="customerPass">Password</label><input id="customerPass" type="password" minlength="6" autocomplete="new-password" required placeholder="At least 6 characters" /></div>
         <button class="primary dark" type="submit">Continue to scan</button>
       </form>
     </div>
     <div class="auth-card hidden" id="vendorAuth">
-      <button class="back" data-back-role>← Back</button><div class="setup-steps"><span class="done"></span><span></span><span></span></div><div class="eyebrow">Vendor access</div><h1>Sign in to your outlet</h1><p>Sign in with the email and password your outlet admin created for you.</p><form id="vendorAuthForm"><div class="field"><label for="vendorEmail">Email</label><input id="vendorEmail" type="email" autocomplete="username" required placeholder="you@example.com" /></div><div class="field"><label for="vendorPass">Password</label><input id="vendorPass" type="password" autocomplete="current-password" required /></div><button class="primary dark" type="submit">Sign in</button></form><p id="vendorAuthMsg" class="cart-note" style="margin-top:12px;color:#a43d32"></p>
+      <button class="back" data-back-role>← Back</button><div class="setup-steps"><span class="done"></span><span></span><span></span></div><div class="eyebrow">Vendor access</div><h1>Sign in to your outlet</h1><p>Sign in with the email and password your outlet admin created for you.</p><form id="vendorAuthForm"><div class="field"><label for="vendorEmail">Email</label><input id="vendorEmail" type="email" autocomplete="username" required placeholder="you@example.com" /></div><div class="field"><label for="vendorOutlet">Where do you work?</label><select id="vendorOutlet" required><option value="HARI-001">Hari Super Sandwich</option><option value="MING-001">Mingos</option></select></div><div class="field"><label for="vendorPass">Password</label><input id="vendorPass" type="password" autocomplete="current-password" required /></div><button class="primary dark" type="submit">Sign in</button><button class="back" id="vendorCreateAccount" type="button">First time? Set your password</button></form><p id="vendorAuthMsg" class="cart-note" style="margin-top:12px;color:#a43d32"></p>
     </div>
     <div class="auth-card hidden" id="vendorPlace">
       <button class="back" data-back-auth>← Back</button><div class="setup-steps"><span class="done"></span><span class="done"></span><span></span></div><div class="eyebrow">Your workplace</div><h1>Where do you work?</h1><p>This name appears on the customer’s phone after they scan your QR.</p>
@@ -159,7 +159,7 @@
   <main class="shell">
     <section id="customerApp" class="customer-layout">
       <aside class="side">
-        <div class="restaurant-mini"><strong>Hari Super Sandwich</strong><small>Open · 12 min wait</small></div>
+        <div class="restaurant-mini"><strong class="outlet-name">Hari Super Sandwich</strong><small>Open · 12 min wait</small></div>
         <button class="navbtn active" data-page="menu"><span>⌂</span><span class="navlabel">Order</span></button>
         <button class="navbtn" data-page="tracking"><span>◉</span><span class="navlabel">Track order</span></button>
         <button class="navbtn" data-page="rewards"><span>✦</span><span class="navlabel">Rewards</span></button>
@@ -169,7 +169,7 @@
         <section id="page-menu" class="page">
           <div class="hero"><div class="hero-copy"><div class="eyebrow">Open until 9:30 PM</div><h1>Hari Super<br>Sandwich</h1><div class="hero-tagline">Skip the line. Keep the crunch.</div><p>Order ahead and collect securely when your token is called.</p><div class="hero-meta"><span class="chip">● 12 min pickup</span><span class="chip">★ 4.8</span><span class="chip">Veg friendly</span></div></div><div class="hero-image" role="img" aria-label="Grilled sandwich with fries and cola"></div></div>
           <div class="section-head"><div><div class="eyebrow">Today’s menu</div><h2>What are you craving?</h2></div></div>
-          <div class="tabs" aria-label="Menu categories"><button type="button" class="tab active" data-menu-category="Popular" onclick="renderMenu('Popular')">Popular</button><button type="button" class="tab" data-menu-category="Sandwiches" onclick="renderMenu('Sandwiches')">Sandwiches</button><button type="button" class="tab" data-menu-category="Sides" onclick="renderMenu('Sides')">Sides</button><button type="button" class="tab" data-menu-category="Drinks" onclick="renderMenu('Drinks')">Drinks</button></div>
+          <div class="tabs" aria-label="Menu categories"><button type="button" class="tab active" data-menu-category="Popular" onclick="renderMenu('Popular')">Popular</button><button type="button" class="tab" data-menu-category="Biryani" onclick="renderMenu('Biryani')">Biryani</button><button type="button" class="tab" data-menu-category="Sides" onclick="renderMenu('Sides')">Sides</button><button type="button" class="tab" data-menu-category="Drinks" onclick="renderMenu('Drinks')">Drinks</button></div>
           <div class="menu-grid" id="menuGrid"></div>
         </section>
         <section id="page-tracking" class="page hidden">
@@ -212,7 +212,7 @@
   </section>
   <div id="toast" class="toast hidden"></div>
   <script>
-    const foods=[{name:'Veg Cheese Sandwich',desc:'Grilled vegetables, double cheese and house green chutney.',price:60,cat:'Sandwiches',popular:true},{name:'Hari Club Combo',desc:'Triple-layer club sandwich, masala fries and a chilled drink.',price:120,cat:'Sandwiches',popular:true},{name:'Paneer Tikka Melt',desc:'Smoky paneer, onion, capsicum and mint mayo.',price:95,cat:'Sandwiches',popular:true},{name:'Masala Fries',desc:'Crisp golden fries tossed in our punchy spice mix.',price:55,cat:'Sides',popular:true},{name:'Diet Coke',desc:'Chilled 300 ml can. Also available as a loyalty reward.',price:40,cat:'Drinks',popular:false},{name:'Cold Coffee',desc:'Creamy, lightly sweet and blended fresh.',price:70,cat:'Drinks',popular:true}];
+    let foods=[{name:'Veg Cheese Sandwich',desc:'Grilled vegetables, double cheese and house green chutney.',price:60,cat:'Sandwiches',popular:true},{name:'Hari Club Combo',desc:'Triple-layer club sandwich, masala fries and a chilled drink.',price:120,cat:'Sandwiches',popular:true},{name:'Paneer Tikka Melt',desc:'Smoky paneer, onion, capsicum and mint mayo.',price:95,cat:'Sandwiches',popular:true},{name:'Masala Fries',desc:'Crisp golden fries tossed in our punchy spice mix.',price:55,cat:'Sides',popular:true},{name:'Diet Coke',desc:'Chilled 300 ml can. Also available as a loyalty reward.',price:40,cat:'Drinks',popular:false},{name:'Cold Coffee',desc:'Creamy, lightly sweet and blended fresh.',price:70,cat:'Drinks',popular:true}]; const outletMenus={hari:[...foods],mingos:[{name:'Veg Biryani',desc:'Fragrant basmati rice with garden vegetables and aromatic spices.',price:110,cat:'Biryani',popular:true},{name:'Chicken Biryani',desc:'Tender chicken layered with saffron rice, fried onions and mint.',price:160,cat:'Biryani',popular:true},{name:'Paneer Biryani',desc:'Spiced paneer, basmati rice and fresh herbs cooked dum-style.',price:140,cat:'Biryani',popular:true},{name:'Chicken 65',desc:'Crispy, spicy chicken bites with curry leaves.',price:120,cat:'Sides',popular:true},{name:'Raita',desc:'Cool seasoned yogurt with cucumber and herbs.',price:35,cat:'Sides',popular:false},{name:'Fresh Lime Soda',desc:'Chilled lime soda, lightly sweet and refreshing.',price:45,cat:'Drinks',popular:true}]}; let currentOutlet='hari'; function setOutlet(kind){currentOutlet=kind==='mingos'?'mingos':'hari';foods=outletMenus[currentOutlet].map(x=>({...x}));const name=currentOutlet==='mingos'?'Mingos':'Hari Super Sandwich';document.querySelectorAll('.cart-sub').forEach(x=>x.textContent=name);document.querySelectorAll('.outlet-name').forEach(x=>x.textContent=name);renderMenu();renderCart();}
     let cart={},selectedPickup='now',preorderHour='12',preorderMinute='30',preorderPeriod='PM'; const grid=document.querySelector('#menuGrid');
     function renderMenu(category='Popular'){const visible=foods.map((food,index)=>({food,index})).filter(({food})=>category==='Popular'?food.popular:food.cat===category);grid.innerHTML=visible.map(({food:f,index:i})=>`<article class="menu-card"><div><span class="veg">VEG</span><h3>${f.name}</h3><p>${f.desc}</p><span class="price">₹${f.price}</span></div><button class="add" aria-label="Add ${f.name}" data-add="${i}">+</button></article>`).join('');document.querySelectorAll('[data-menu-category]').forEach(button=>{const active=button.dataset.menuCategory===category;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active))})}
     renderMenu();
@@ -246,8 +246,8 @@
     let scanDone=false,scanBad=0;
     function isEatongoQr(text){
       text=String(text||'').trim();
-      try{const u=new URL(text),id=u.searchParams.get('res_id'),code=(u.searchParams.get('outlet')||'').toUpperCase();if(id==='00'||code==='HARI-001')return true}catch(e){}
-      return text.toUpperCase()==='HARI-001'||/(^|[?&])res_id=00(&|$)/.test(text);
+      try{const u=new URL(text),id=u.searchParams.get('res_id'),code=(u.searchParams.get('outlet')||'').toUpperCase();if(id==='00'||id==='01'||code==='HARI-001'||code==='MING-001')return true}catch(e){}
+      return text.toUpperCase()==='HARI-001'||text.toUpperCase()==='MING-001'||/(^|[?&])res_id=(00|01)(&|$)/.test(text);
     }
     function beginDecoding(){
       scanDone=false;
@@ -298,7 +298,7 @@
        ?vendor=overview        vendor dashboard        (queue|verify|menu|loyalty|analytics)
        (works on GitHub Pages, survives refresh, back/forward buttons work)                     */
     (()=>{
-      const OUTLETS={'00':{code:'HARI-001',name:'Hari Super Sandwich'}};
+      const OUTLETS={'00':{code:'HARI-001',name:'Hari Super Sandwich',kind:'hari'},'01':{code:'MING-001',name:'Mingos',kind:'mingos'}};
       const $=s=>document.querySelector(s);
       let res='00',applying=false;
       const og={showPage,showVPage,screen,unlock,role,startScanner,stopCamera,openVendorOps};
@@ -348,11 +348,11 @@
           og.stopCamera();
           $('#pickupPass').classList.add('hidden');
           $('#cartPanel').classList.remove('open');
-          if(q.get('outlet')&&q.get('outlet').toUpperCase()==='HARI-001')history.replaceState(null,'',location.pathname+'?res_id=00'),q.set('res_id','00');   // old ?outlet= QR links still work
+          if(q.get('outlet')){const code=q.get('outlet').toUpperCase(),match=Object.entries(OUTLETS).find(([,o])=>o.code===code);if(match)history.replaceState(null,'',location.pathname+'?res_id='+match[0]),q.set('res_id',match[0]);}   // old ?outlet= QR links still work
           if(q.has('res_id')){
             const id=q.get('res_id');
             if(OUTLETS[id]){
-              res=id;og.unlock(false);
+              res=id;setOutlet(OUTLETS[id].kind);og.unlock(false);
               const pg=q.get('page');
               og.showPage(pg&&document.getElementById('page-'+pg)?pg:'menu');
             }else{
@@ -390,3 +390,4 @@
   <script src="backend.js"></script>
 </body>
 </html>
+

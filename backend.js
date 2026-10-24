@@ -113,6 +113,7 @@
       setStaff: (email, role) => db.ref('staff/' + emailKey(email)).set(role),
       removeStaff: email => db.ref('staff/' + emailKey(email)).remove(),
       signInEmail: (email, pass) => auth.signInWithEmailAndPassword(email, pass),
+      createUserEmail: (email, pass) => auth.createUserWithEmailAndPassword(email, pass),
       async exportAll() { return { orders: (await db.ref('orders').once('value')).val() }; }
     };
   }
@@ -135,9 +136,9 @@
   const FLOW_INDEX = { new: 0, preparing: 2, ready: 3, collected: 4 };
   const isStaffRole = () => role === 'vendor' || role === 'admin';
 
-  const isLive = o => o.status !== 'collected' && o.pickup !== 'pre';
-  const isPre = o => o.status !== 'collected' && o.pickup === 'pre';
-  const isDone = o => o.status === 'collected';
+  const isLive = o => !['collected','declined'].includes(o.status) && o.pickup !== 'pre';
+  const isPre = o => !['collected','declined'].includes(o.status) && o.pickup === 'pre';
+  const isDone = o => ['collected','declined'].includes(o.status);
   const itemsText = o => (o.items || []).map(i => `${esc(i.name)} × ${i.qty}`).join(', ');
   const metaText = o => `${esc(o.customer)} · ₹${o.total} · Paid · ${timeStr(o.createdAt)}${o.pickup === 'pre' ? ' · Pre-order ' + esc(o.pickupTime) : ''}`;
 
@@ -150,11 +151,16 @@
 
   function setRole(r) {
     role = r; store.stop(); known = null; orders = []; lastMineStatus = null;
+    document.body.classList.toggle('restricted-vendor', r === 'vendor');
     if (r === 'customer') {
       mountAdminPanel(false);
       if (inVendorView()) { kickToLogin(); return; }
       if (mineId) store.listenOne(mineId, onOrders);
       renderVendor();
+    } else if (sessionStorage.getItem('eatongo_customer_intent')) {
+      sessionStorage.removeItem('eatongo_customer_intent');
+      setRole('customer');
+      if (typeof startScanner === 'function') startScanner();
     } else {
       sessionStorage.setItem('eatongo_vendor', '1');
       store.listenAll(onOrders);
@@ -197,6 +203,7 @@
     const s = store || await ready;
     if (s.mode === 'local') { screen('vendorPlace'); return; }      // local test mode: no real login
     const email = $('#vendorEmail').value.trim(), pass = $('#vendorPass').value;
+    sessionStorage.setItem('eatongo_vendor_outlet', $('#vendorOutlet')?.value || 'HARI-001');
     sessionStorage.setItem('eatongo_intent', '1');
     const btn = authForm.querySelector('button[type=submit]'); if (btn) btn.disabled = true;
     // wait for the silent anonymous sign-in to finish first, so it can't overwrite this login
@@ -232,6 +239,28 @@
     } else {
       setTimeout(() => { const c = $('#vendorAuth'); if (c && !c.classList.contains('hidden') && msg && msg.textContent === 'Signing in…') msg.textContent = 'Signed in, but could not load your vendor access. Press F12 → Console and send me the red error.'; }, 6000);
     }
+  };
+
+  const vendorCreate = $('#vendorCreateAccount');
+  if (vendorCreate) vendorCreate.onclick = async () => {
+    const email=$('#vendorEmail').value.trim().toLowerCase(), pass=$('#vendorPass').value, msg=$('#vendorAuthMsg');
+    sessionStorage.setItem('eatongo_vendor_outlet', $('#vendorOutlet')?.value || 'HARI-001');
+    const s=store||await ready;
+    if(s.mode==='local'){if(msg)msg.textContent='Local mode does not require account setup.';return;}
+    try { const approved=await s.roleOf(email); if(!approved){if(msg)msg.textContent='This email has not been authorised by an admin.';return;} await s.createUserEmail(email,pass); }
+    catch(err){if(msg)msg.textContent=err.code==='auth/email-already-in-use'?'Account already exists. Use Sign in.':'Could not create the account. Check the authorised email.';}
+  };
+
+  const customerForm = $('#customerNameForm');
+  if (customerForm) customerForm.onsubmit = async e => {
+    e.preventDefault();
+    const name=$('#customerName').value.trim(), email=$('#customerEmail')?.value.trim().toLowerCase(), pass=$('#customerPass')?.value;
+    if (!name || !email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !pass || pass.length<6) { toast('<b>Enter a valid email and a password of at least 6 characters.</b>'); return; }
+    sessionStorage.setItem('eatongoCustomerName',name); sessionStorage.setItem('eatongo_customer_intent','1');
+    const s=store||await ready;
+    if(s.mode==='local'){startScanner();return;}
+    try { try { await s.createUserEmail(email,pass); } catch(err) { if(err.code==='auth/email-already-in-use') await s.signInEmail(email,pass); else throw err; } }
+    catch(err){sessionStorage.removeItem('eatongo_customer_intent');toast('<b>Could not create or sign in.</b> Check your details.');}
   };
 
   function injectSignOut() {
@@ -335,7 +364,7 @@
   const LABEL = { new: 'Accept', preparing: 'Mark ready', ready: 'Complete' };
   const LABEL_OPS = { new: 'Accept order', preparing: 'Mark ready', ready: 'Complete pickup' };
   const row = o => `<div class="order-row"><div class="order-no">#${o.no}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div><button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button></div>`;
-  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${o.no}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button>`}</article>`;
+  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${o.no}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button><button class="status" style="margin-left:8px;background:#ffe5e2;color:#a43d32" data-decline="${esc(o.id)}">Decline order</button>`}</article>`;
   const EMPTY_ROW = '<p class="sub" style="padding:14px">No orders here yet. New orders appear instantly.</p>';
   const EMPTY_CARD = '<div class="ops-empty"><b>No orders here</b>The next order will appear automatically.</div>';
 
@@ -381,6 +410,12 @@
 
   /* ---------- vendor: update order status ---------- */
   document.addEventListener('click', async e => {
+    const decline = e.target.closest('[data-decline]');
+    if (decline && isStaffRole()) {
+      const o = orders.find(x => x.id === decline.dataset.decline);
+      if (o) { decline.disabled = true; try { await store.update(o.id, { status: 'declined', updatedAt: Date.now(), declineReason: 'Declined by vendor' }); toast('<b>Order declined.</b>'); } catch (err) { decline.disabled = false; toast('<b>Could not decline order.</b>'); } }
+      return;
+    }
     const b = e.target.closest('[data-oid]');
     if (!b || b.disabled || !isStaffRole()) return;
     const o = orders.find(x => x.id === b.dataset.oid);
@@ -455,3 +490,4 @@
     a.download = 'orders.json'; a.click();
   };
 })();
+
