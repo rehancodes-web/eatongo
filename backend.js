@@ -75,7 +75,7 @@
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-app-compat.js`);
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-auth-compat.js`);
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-database-compat.js`);
-    firebase.initializeApp(FIREBASE_CONFIG);
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     const db = firebase.database(), auth = firebase.auth();
     let off = null;
     const stop = () => { if (off) { off(); off = null; } };
@@ -309,8 +309,8 @@
   /* ---------- vendor: render ---------- */
   const LABEL = { new: 'Accept', preparing: 'Mark ready', ready: 'Complete' };
   const LABEL_OPS = { new: 'Accept order', preparing: 'Mark ready', ready: 'Complete pickup' };
-  const row = o => `<div class="order-row"><div class="order-no">#${o.no}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div><button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button></div>`;
-  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${o.no}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button>`}</article>`;
+  const row = o => `<div class="order-row"><div class="order-no">#${esc(o.token ?? o.no)}</div><div><h3>${itemsText(o)}</h3><p>${metaText(o)}<span class="order-auth" aria-label="Authentication code">#${esc(o.auth)}</span></p></div><button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL[o.status]}</button></div>`;
+  const card = o => `<article class="ops-card"><div class="ops-card-top"><div class="ops-number">#${esc(o.token ?? o.no)}</div><div class="ops-auth">#${esc(o.auth)}</div></div><h3>${itemsText(o)}</h3><p>${metaText(o)}</p>${o.status === 'collected' ? '<button class="status ready" disabled>Collected ✓</button>' : `<button class="status ${o.status}" data-oid="${esc(o.id)}">${LABEL_OPS[o.status]}</button>`}</article>`;
   const EMPTY_ROW = '<p class="sub" style="padding:14px">No orders here yet. New orders appear instantly.</p>';
   const EMPTY_CARD = '<div class="ops-empty"><b>No orders here</b>The next order will appear automatically.</div>';
 
@@ -393,6 +393,7 @@
   }
 
   function onOrders(list) {
+    list = (Array.isArray(list) ? list : []).filter(o => o && o.id && o.createdAt);
     const fresh = known === null ? [] : list.filter(o => !known.has(o.id));
     known = new Set(list.map(o => o.id));
     orders = list.slice().sort((a, b) => a.createdAt - b.createdAt);
@@ -421,7 +422,20 @@
     s.auth.onAuthStateChanged(onUser);
   });
 
-  /* optional: eatongoExport() in console downloads orders.json (staff only) */
+  // Expose the same live order data used by the vendor dashboard for analytics.
+  // This keeps daily/weekly/monthly summaries tied to real orders instead of
+  // requiring a second data source in the UI.
+  window.eatongoAnalytics = function(period = 'daily') {
+    const now = Date.now(), dayMs = 86400000;
+    const cutoff = period === 'monthly' ? now - 30 * dayMs : period === 'weekly' ? now - 7 * dayMs : now - dayMs;
+    const scoped = orders.filter(o => Number(o.createdAt) >= cutoff);
+    const itemTotals = {};
+    scoped.forEach(o => (o.items || []).forEach(i => { itemTotals[i.name] = (itemTotals[i.name] || 0) + Number(i.qty || 0); }));
+    const top = Object.entries(itemTotals).sort((a, b) => b[1] - a[1])[0] || ['No sales yet', 0];
+    return { period, orderCount: scoped.length, totalSales: scoped.reduce((sum, o) => sum + Number(o.total || 0), 0), topItem: top[0], topItemQty: top[1], orders: scoped };
+  };
+
+  /* optional: run eatongoExport() in the console to download all data as orders.json */
   window.eatongoExport = async () => {
     const data = await (store || await ready).exportAll();
     const a = document.createElement('a');
