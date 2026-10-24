@@ -98,8 +98,6 @@
     body.locked{background:radial-gradient(circle at 18% 18%,#ff7048 0 11%,transparent 34%),radial-gradient(circle at 82% 80%,#8d74ff 0 13%,transparent 38%),linear-gradient(135deg,#b7c6ff,#d8ff3e)}body.locked .onboarding{width:min(100%,480px);margin:auto;box-shadow:0 0 80px #211b4966}.onboarding .onboard-card{width:100%}.onboarding .role-cards{grid-template-columns:1fr}.onboarding .role-card{min-height:165px}.scanner-screen,.pickup-pass{left:50%;right:auto;width:min(100%,480px);transform:translateX(-50%);box-shadow:0 0 80px #0009}body.vendor-mode{overflow-x:auto}body.vendor-mode .topbar,body.vendor-mode .shell{min-width:1100px}body.vendor-mode .vendor{display:grid;grid-template-columns:250px 1fr;min-width:1100px}body.vendor-mode .vendor>.side{display:block}body.vendor-mode .vendor-main{padding:32px}body.vendor-mode .stats{grid-template-columns:repeat(4,1fr)}body.vendor-mode .queue-grid{grid-template-columns:1.3fr .7fr}body.vendor-mode .vendor>.mobile-nav{display:none}
     body.ops-mode{background:radial-gradient(circle at 12% 12%,#6e4cff 0 12%,transparent 36%),radial-gradient(circle at 88% 86%,#ff7048 0 10%,transparent 35%),#b7c6ff}body.ops-mode .topbar,body.ops-mode .shell{display:none}.vendor-ops{width:min(100%,480px);min-height:100vh;margin:auto;background:#f7f5ff;box-shadow:0 0 80px #211b4966;padding:18px 16px 110px;position:relative}.ops-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}.ops-top .brand{color:#171717}.dashboard-launch{border:2px solid #171717;background:#d8ff3e;color:#171717;border-radius:12px;padding:10px 12px;font-weight:900;box-shadow:3px 3px 0 #171717}.ops-hero{background:#171717;color:white;border-radius:25px;padding:24px 20px;box-shadow:6px 7px 0 #6e4cff;margin-bottom:24px}.ops-hero .eyebrow{color:#d8ff3e}.ops-hero h1{font-size:2.35rem;line-height:.92;letter-spacing:-.06em;margin:9px 0}.ops-hero p{color:#bfc5bc;margin:0;line-height:1.45}.ops-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:16px}.ops-tab{border:2px solid #171717;background:white;border-radius:13px;padding:11px 7px;font-size:.78rem;font-weight:900;box-shadow:2px 2px 0 #171717}.ops-tab.active{background:#ffde3b}.ops-list{display:flex;flex-direction:column;gap:12px}.ops-card{background:white;border:2px solid #171717;border-radius:19px;padding:16px;box-shadow:4px 5px 0 #171717}.ops-card-top{display:flex;align-items:start;justify-content:space-between;gap:12px}.ops-number{font-size:1.55rem;font-weight:1000;letter-spacing:-.05em}.ops-auth{background:#171717;color:#d8ff3e;border-radius:9px;padding:7px 9px;font-size:.82rem;font-weight:950;letter-spacing:.1em}.ops-card h3{font-size:1.05rem;margin:14px 0 6px}.ops-card p{font-size:.83rem;color:#686d63;margin:0}.ops-card .status{margin-top:14px;width:100%;padding:11px}.ops-empty{text-align:center;padding:48px 20px;color:#686d63}.ops-empty b{display:block;font-size:2rem;color:#171717;margin-bottom:8px}
   </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';document.head.appendChild(s)"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 </head>
 <body class="locked">
   <section id="onboarding" class="onboarding">
@@ -231,58 +229,10 @@
     document.querySelector('#menuTable').innerHTML=foods.map((f,i)=>`<tr><td><b>${f.name}</b></td><td>${f.cat}</td><td>₹${f.price}</td><td>${[21,13,6,8,7,5][i]}</td><td><button class="toggle on" aria-label="Toggle ${f.name}" onclick="this.classList.toggle('on')"></button></td></tr>`).join('');
     document.querySelector('#verifyToken').onclick=()=>{const v=document.querySelector('#tokenInput').value.trim().toUpperCase(),r=document.querySelector('#verifyResult');r.innerHTML=v==='HS-1042'?'<div class="success">✓ Verified · Paid · Veg Cheese Sandwich × 1 · Token active</div>':'<div class="success" style="background:#ffe5e2;color:#a43d32">Token not found or already collected.</div>'};
     let cameraStream=null,scanTimer=null;function screen(id){['roleStep','customerNamePrompt','vendorAuth','vendorPlace','vendorMenuSetup'].forEach(x=>document.querySelector('#'+x).classList.toggle('hidden',x!==id))}function unlock(vendor){clearTimeout(scanTimer);document.body.classList.remove('locked','ops-mode');document.querySelector('#onboarding').classList.add('hidden');document.querySelector('#customerScanner').classList.add('hidden');document.querySelector('#vendorOps').classList.add('hidden');role(vendor)}function openVendorOps(){document.body.classList.remove('locked','vendor-mode');document.body.classList.add('ops-mode');document.querySelector('#onboarding').classList.add('hidden');document.querySelector('#customerScanner').classList.add('hidden');document.querySelector('#vendorOps').classList.remove('hidden');renderOps('live');window.scrollTo(0,0)}
-    function completeDemoScan(){const scanner=document.querySelector('#customerScanner');if(scanner.classList.contains('hidden'))return;document.querySelector('#cameraStatus').textContent='QR detected · Opening Hari Super Sandwich…';setTimeout(()=>{stopCamera();unlock(false);toast('<b>Hari Super Sandwich found.</b> Live menu loaded.')},650)}
-    async function startScanner(){document.querySelector('#onboarding').classList.add('hidden');document.querySelector('#customerScanner').classList.remove('hidden');const status=document.querySelector('#cameraStatus');clearTimeout(scanTimer);try{cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});document.querySelector('#cameraVideo').srcObject=cameraStream;status.textContent='Point the camera at the outlet’s QR code.';beginDecoding()}catch(e){status.textContent='Camera unavailable here. Use the demo scan below.'}}
+    async function startScanner(){document.querySelector('#onboarding').classList.add('hidden');document.querySelector('#customerScanner').classList.remove('hidden');const status=document.querySelector('#cameraStatus');clearTimeout(scanTimer);try{cameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});document.querySelector('#cameraVideo').srcObject=cameraStream;status.textContent='Point the camera at any QR code.'}catch(e){status.textContent='Camera unavailable here. Use the demo scan below.'}}
     function stopCamera(){clearTimeout(scanTimer);if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null}}
     document.querySelector('#chooseCustomer').onclick=()=>screen('customerNamePrompt');document.querySelector('#chooseVendor').onclick=()=>screen('vendorAuth');document.querySelector('#backCustomerName').onclick=()=>screen('roleStep');document.querySelector('#customerNameForm').onsubmit=e=>{e.preventDefault();const name=document.querySelector('#customerName').value.trim();if(!name)return;sessionStorage.setItem('eatongoCustomerName',name);startScanner()};document.querySelector('[data-back-role]').onclick=()=>screen('roleStep');document.querySelector('[data-back-auth]').onclick=()=>screen('vendorAuth');document.querySelector('[data-back-place]').onclick=()=>screen('vendorPlace');document.querySelector('#vendorAuthForm').onsubmit=e=>{e.preventDefault();screen('vendorPlace')};document.querySelector('#vendorPlaceForm').onsubmit=e=>{e.preventDefault();screen('vendorMenuSetup')};document.querySelector('#finishVendor').onclick=()=>{openVendorOps();toast('<b>Outlet ready.</b> Menu published and orders are live.')};document.querySelector('#openDashboard').onclick=()=>unlock(true);document.querySelector('#menuFile').onchange=e=>{if(e.target.files[0])toast('<b>Menu uploaded.</b> '+e.target.files[0].name+' is ready to review.')};document.querySelector('#scannerBack').onclick=()=>{stopCamera();document.querySelector('#customerScanner').classList.add('hidden');document.querySelector('#onboarding').classList.remove('hidden');screen('roleStep')};document.querySelector('#demoScan').onclick=()=>{stopCamera();unlock(false);toast('<b>Hari Super Sandwich found.</b> Live menu loaded.')};document.querySelector('#manualCode').onclick=()=>{const code=prompt('Enter outlet code','HARI-001');if(code&&code.trim().toUpperCase()==='HARI-001'){stopCamera();unlock(false);toast('<b>Outlet verified.</b> Live menu loaded.')}};
     function role(vendor){document.body.classList.toggle('vendor-mode',vendor);document.querySelector('#customerApp').classList.toggle('hidden',vendor);document.querySelector('#vendorApp').classList.toggle('hidden',!vendor);document.querySelector('#customerRole').classList.toggle('active',!vendor);document.querySelector('#vendorRole').classList.toggle('active',vendor)}document.querySelector('#customerRole').onclick=()=>role(false);document.querySelector('#vendorRole').onclick=()=>role(true);renderCart();const scannedOutlet=new URLSearchParams(location.search).get('outlet');if(scannedOutlet?.toUpperCase()==='HARI-001'){unlock(false);showPage('menu');setTimeout(()=>toast('<b>Hari Super Sandwich found.</b> Live menu loaded.'),250)}
-
-
-    /* ===== Real QR scanning (BarcodeDetector where available, jsQR everywhere else) ===== */
-    let scanDone=false,scanBad=0;
-    function isEatongoQr(text){
-      text=String(text||'').trim();
-      try{const u=new URL(text),id=u.searchParams.get('res_id'),code=(u.searchParams.get('outlet')||'').toUpperCase();if(id==='00'||code==='HARI-001')return true}catch(e){}
-      return text.toUpperCase()==='HARI-001'||/(^|[?&])res_id=00(&|$)/.test(text);
-    }
-    function beginDecoding(){
-      scanDone=false;
-      const video=document.querySelector('#cameraVideo'),status=document.querySelector('#cameraStatus');
-      const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d',{willReadFrequently:true});
-      let detector=null,busy=false;
-      if('BarcodeDetector' in window){try{detector=new BarcodeDetector({formats:['qr_code']})}catch(e){}}
-      video.play&&video.play().catch(()=>{});
-      const tick=async()=>{
-        if(!cameraStream||scanDone)return;
-        scanTimer=setTimeout(tick,detector?120:180);
-        if(busy||video.readyState<2||!video.videoWidth)return;
-        busy=true;
-        try{
-          let text=null;
-          if(detector){const found=await detector.detect(video);if(found.length)text=found[0].rawValue}
-          if(text===null&&window.jsQR){
-            const scale=Math.min(1,640/video.videoWidth);
-            canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);
-            ctx.drawImage(video,0,0,canvas.width,canvas.height);
-            const img=ctx.getImageData(0,0,canvas.width,canvas.height),code=jsQR(img.data,img.width,img.height,{inversionAttempts:'attemptBoth'});
-            if(code)text=code.data;
-          }
-          if(text!==null&&!scanDone){
-            if(isEatongoQr(text)){scanDone=true;clearTimeout(scanTimer);completeDemoScan()}
-            else if(Date.now()-scanBad>2500){scanBad=Date.now();status.textContent='That QR isn’t an eatongo outlet. Try the outlet’s QR.';setTimeout(()=>{if(!scanDone&&cameraStream)status.textContent='Point the camera at the outlet’s QR code.'},2500)}
-          }
-        }catch(e){}finally{busy=false}
-      };
-      tick();
-    }
-    /* outlet QR on the vendor dashboard: a real, scannable QR that opens this outlet */
-    function renderOutletQr(){
-      const el=document.querySelector('.vendor-qr .qr');if(!el||!window.qrcode)return;
-      try{const qr=qrcode(0,'M');qr.addData(location.href.split(/[?#]/)[0]+'?res_id=00');qr.make();
-        el.innerHTML=qr.createSvgTag({cellSize:4,margin:0,scalable:true});el.style.cssText+=';background:#fff;padding:4px';
-        const s=el.querySelector('svg');if(s){s.style.width='100%';s.style.height='100%';s.style.display='block'}}catch(e){}
-    }
-    renderOutletQr();
 
     /* ===== eatongo URL routing — paste at the very end of your main script =====
        /                       role select
@@ -375,7 +325,14 @@
       window.addEventListener('popstate',apply);
       apply();
     })();
-         document.querySelectorAll(".brand").forEach(brand => {
+        document.querySelectorAll(".brand").forEach(brand => {
+        brand.style.cursor = "pointer";
+
+        brand.addEventListener("click", () => {
+            window.location.href = window.location.pathname;
+        });
+    });
+      document.querySelectorAll(".brand").forEach(brand => {
       brand.style.cursor = "pointer";
 
       brand.addEventListener("click", () => {
@@ -385,3 +342,4 @@
   </script>
 </body>
 </html>
+
