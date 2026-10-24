@@ -6,7 +6,7 @@
   'use strict';
 
   /* ====== 1. PASTE YOUR FIREBASE CONFIG HERE (leave databaseURL empty = local test mode) ====== */
-const firebaseConfig = {
+const FIREBASE_CONFIG = {
 
   apiKey: "AIzaSyDQy3PGM914RE8A8Y50dHxjsVpeBDsJLZw",
 
