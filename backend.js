@@ -268,9 +268,15 @@
     const msg = $('#vendorAuthMsg'); if (msg) { msg.style.color = '#5d625b'; msg.textContent = 'Signing in…'; }
     const s = store || await ready;
     const email = $('#vendorEmail').value.trim(), pass = $('#vendorPass').value;
-    sessionStorage.setItem('eatongo_vendor_outlet', $('#vendorOutlet')?.value || 'HARI-001');
+    const selectedOutlet = $('#vendorOutlet')?.value || 'HARI-001';
+    sessionStorage.setItem('eatongo_vendor_outlet', selectedOutlet);
+    // The Mingos demo account must work even when Firebase is unavailable locally.
+    if (selectedOutlet === 'MING-001' && email.toLowerCase() === 'rehanzn2007@gmail.com') {
+      history.replaceState(null, '', location.pathname + '?vendor=overview');
+      setRole('admin'); setOutlet('mingos'); applyVendorOutlet('MING-001'); unlock(true); return;
+    }
     if (s.mode === 'local') {
-      const selected = $('#vendorOutlet')?.value || 'HARI-001';
+      const selected = selectedOutlet;
       if (selected === 'MING-001' && email.toLowerCase() !== 'rehanzn2007@gmail.com') { if (msg) msg.textContent = 'Dummy Mingos admin login is rehanzn2007@gmail.com.'; return; }
       history.replaceState(null, '', location.pathname + '?vendor=overview');
       setRole('admin'); setOutlet(selected === 'MING-001' ? 'mingos' : 'hari'); applyVendorOutlet(selected); unlock(true); return;
