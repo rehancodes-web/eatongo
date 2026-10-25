@@ -128,7 +128,7 @@
     </div>
     <div class="auth-card hidden" id="vendorAuth">
       <button class="back" data-back-role>← Back</button><div class="setup-steps"><span class="done"></span><span></span><span></span></div><div class="eyebrow">Vendor access</div><h1>Sign in to your outlet</h1><p>This is a dummy sign-in for the demo. Production access will use verified vendor accounts.</p>
-      <form id="vendorAuthForm"><div class="field"><label>Work email or phone</label><input required value="manager@harisandwich.in" /></div><div class="field"><label>Demo password</label><input type="password" required value="demo1234" /></div><button class="primary dark" type="submit" onclick="event.preventDefault();screen('vendorPlace')">Continue securely</button></form>
+      <form id="vendorAuthForm"><div class="field"><label>Work email or phone</label><input id="vendorEmail" type="email" required value="manager@harisandwich.in" /></div><div class="field"><label>Demo password</label><input id="vendorPass" type="password" required value="demo1234" /></div><button class="primary dark" type="submit">Continue securely</button></form>
     </div>
     <div class="auth-card hidden" id="vendorPlace">
       <button class="back" data-back-auth>← Back</button><div class="setup-steps"><span class="done"></span><span class="done"></span><span></span></div><div class="eyebrow">Your workplace</div><h1>Where do you work?</h1><p>This name appears on the customer’s phone after they scan your QR.</p>
