@@ -349,11 +349,11 @@
   const customerForm = $('#customerNameForm');
   if (customerForm) customerForm.onsubmit = async e => {
     e.preventDefault();
-    const name = $('#customerName').value.trim(), email = $('#customerEmail').value.trim().toLowerCase(), pass = $('#customerPass').value;
+    const name = $('#customerName')?.value.trim() || '', email = $('#customerEmail')?.value.trim().toLowerCase() || '', pass = $('#customerPass')?.value || '';
     const reg = custMode === 'register';
     if (reg && (name.length < 2 || name.length > 30)) { custMsg('Username must be 2 to 30 characters.', true); return; }
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { custMsg('Enter a valid email.', true); return; }
-    if (pass.length < 6) { custMsg('Password must be at least 6 characters.', true); return; }
+    if ($('#customerEmail') && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { custMsg('Enter a valid email.', true); return; }
+    if ($('#customerPass') && pass.length < 6) { custMsg('Password must be at least 6 characters.', true); return; }
 
     const s = store || await ready;
     if (s.mode === 'local') { sessionStorage.setItem('eatongoCustomerName', name || email); startScanner(); return; }
