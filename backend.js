@@ -43,6 +43,9 @@
     const emit = () => subs.forEach(f => f(list()));
     const write = d => { localStorage.setItem(K, JSON.stringify(d)); emit(); };
     addEventListener('storage', e => { if (e.key === K) emit(); });
+    // file:// pages do not consistently dispatch storage events in every browser.
+    // Poll the shared local store as a fallback so customer/vendor views stay live.
+    const poll = setInterval(emit, 750);
     return {
       mode: 'local',
       async saveProfile() {}, async getProfile() { return null; }, async setLastOrder() {},
@@ -65,9 +68,9 @@
       listStaff(f) { f(read().staff || {}); },
       async setStaff(email, role) { const d = read(); d.staff = d.staff || {}; d.staff[emailKey(email)] = role; write(d); },
       async removeStaff(email) { const d = read(); if (d.staff) delete d.staff[emailKey(email)]; write(d); },
-      listenAll(f) { subs.length = 0; subs.push(f); f(list()); },
-      listenOne(id, f) { subs.length = 0; subs.push(l => f(l.filter(o => o.id === id))); f(list().filter(o => o.id === id)); },
-      stop() { subs.length = 0; },
+      listenAll(f) { subs.push(f); f(list()); },
+      listenOne(id, f) { const listener = l => f(l.filter(o => o.id === id)); subs.push(listener); listener(list()); },
+      stop() { subs.length = 0; clearInterval(poll); },
       async exportAll() { return read(); }
     };
   }
