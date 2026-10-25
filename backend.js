@@ -1,11 +1,14 @@
 /* eatongo backend layer (orders + realtime + Google login + roles)
    Add <script src="backend.js"></script> just before </body>
    Roles:  customer = anonymous Firebase user (no login)
-           vendor   = email/password account listed in  staff/<email> = "vendor"
-           admin    = email/password account listed in  staff/<email> = "admin"  (can add/remove vendors)  */
+           vendor   = verified email listed in  staff/<email> = {role:'vendor', outlet:'HARI-001'}
+                      (orders only: no revenue, no menu editing, no staff management)
+           admin    = Firebase user whose UID is listed in  admins/<uid> = true
+                      (everything: revenue/profit, menu builder, restaurant info, staff)
+   Security is enforced by database.rules.json - hiding things in the page is only cosmetic. */
 (() => {
   'use strict';
-  console.log('eatongo backend build 10');
+  console.log('eatongo backend build 11');
 
   /* ====== FIREBASE CONFIG (leave databaseURL empty = local test mode, no login) ====== */
   const FIREBASE_CONFIG = {
@@ -28,6 +31,7 @@
   const timeStr = ts => new Date(ts).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
   const emailKey = e => String(e).trim().toLowerCase().replace(/\./g, ',');   // firebase keys can't contain "."
   const keyEmail = k => String(k).replace(/,/g, '.');
+  const normStaff = v => v === 'vendor' ? { role: 'vendor', outlet: null } : (v && v.role === 'vendor') ? { role: 'vendor', outlet: v.outlet || null } : null;
 
   /* auth code: 2 letters + 2 digits (no look-alike chars), e.g. KT47 */
   const LET = 'ABCDEFGHJKLMNPQRSTUVWXYZ', DIG = '23456789';
@@ -40,6 +44,8 @@
     const read = () => { try { return JSON.parse(localStorage.getItem(K)) || {}; } catch (e) { return {}; } };
     const list = () => Object.values(read().orders || {});
     const emit = () => subs.forEach(f => f(list()));
+    let menuCb = null, menuCode = null, moneyCb = null;
+    const menuOf = code => Object.entries((read().menus || {})[code] || {}).map(([id, v]) => ({ id, ...v }));
     const write = d => { localStorage.setItem(K, JSON.stringify(d)); emit(); };
     addEventListener('storage', e => { if (e.key === K) emit(); });
     return {
@@ -60,7 +66,17 @@
       },
       async save(o) { const d = read(); d.orders = d.orders || {}; d.orders[o.id] = o; write(d); },
       async update(id, p) { const d = read(); if (d.orders && d.orders[id]) { Object.assign(d.orders[id], p); write(d); } },
-      async roleOf(email) { const v = (read().staff || {})[emailKey(email)]; return v === 'admin' ? 'admin' : v ? 'vendor' : null; },
+      async roleOf(u) { return normStaff((read().staff || {})[emailKey((u && u.email) || '')]); },
+      async getRestaurant(code) { return (read().restaurants || {})[code] || null; },
+      async saveRestaurant(code, info) { const d = read(); d.restaurants = d.restaurants || {}; d.restaurants[code] = { ...(d.restaurants[code] || {}), ...info }; write(d); },
+      menuListen(code, f) { menuCode = code; menuCb = f; f(menuOf(code)); },
+      menuStop() { menuCb = null; },
+      async menuSet(code, id, item) { const d = read(); d.menus = d.menus || {}; d.menus[code] = d.menus[code] || {}; d.menus[code][id] = item; write(d); if (menuCb && menuCode === code) menuCb(menuOf(code)); },
+      async menuRemove(code, id) { const d = read(); if (d.menus && d.menus[code]) delete d.menus[code][id]; write(d); if (menuCb && menuCode === code) menuCb(menuOf(code)); },
+      async saveMoney(id, m) { const d = read(); d.money = d.money || {}; d.money[id] = m; write(d); if (moneyCb) moneyCb(d.money); },
+      listenMoney(f) { moneyCb = f; f(read().money || {}); },
+      stopMoney() { moneyCb = null; },
+      async migrateMoney() { return 0; },
       listStaff(f) { f(read().staff || {}); },
       async setStaff(email, role) { const d = read(); d.staff = d.staff || {}; d.staff[emailKey(email)] = role; write(d); },
       async removeStaff(email) { const d = read(); if (d.staff) delete d.staff[emailKey(email)]; write(d); },
@@ -83,7 +99,7 @@
     await loadScript(`https://www.gstatic.com/firebasejs/${v}/firebase-database-compat.js`);
     firebase.initializeApp(FIREBASE_CONFIG);
     const db = firebase.database(), auth = firebase.auth();
-    let off = null;
+    let off = null, offMenu = null, offMoney = null;
     const stop = () => { if (off) { off(); off = null; } };
     return {
       mode: 'firebase', auth,
@@ -111,9 +127,37 @@
       listenAll(f) { stop(); const r = db.ref('orders'); const h = r.on('value', s => f(Object.values(s.val() || {})), e => console.error(e)); off = () => r.off('value', h); },
       listenOne(id, f) { stop(); const r = db.ref('orders/' + id); const h = r.on('value', s => f(s.val() ? [s.val()] : []), e => console.error(e)); off = () => r.off('value', h); },
       stop,
-      async roleOf(email) {
-        const s = await db.ref('staff/' + emailKey(email)).once('value'), v = s.val();
-        return v === 'admin' ? 'admin' : v ? 'vendor' : null;
+      async roleOf(user) {            // admin = UID in admins/ ; vendor = verified email in staff/
+        try { if ((await db.ref('admins/' + user.uid).once('value')).val() === true) return { role: 'admin', outlet: null }; } catch (e) { /* not admin */ }
+        try {
+          if (!user.email) return null;
+          return normStaff((await db.ref('staff/' + emailKey(user.email)).once('value')).val());
+        } catch (e) { return null; }   // rules deny unverified / unlisted emails
+      },
+      getRestaurant: async code => (await db.ref('restaurants/' + code).once('value')).val(),
+      saveRestaurant: (code, info) => db.ref('restaurants/' + code).update(info),
+      menuListen(code, f) {
+        this.menuStop(); const r = db.ref('menus/' + code);
+        const h = r.on('value', sn => f(Object.entries(sn.val() || {}).map(([id, v]) => ({ id, ...v }))), e => console.error(e));
+        offMenu = () => r.off('value', h);
+      },
+      menuStop() { if (offMenu) { offMenu(); offMenu = null; } },
+      menuSet: (code, id, item) => db.ref(`menus/${code}/${id}`).set(item),
+      menuRemove: (code, id) => db.ref(`menus/${code}/${id}`).remove(),
+      saveMoney: (id, m) => db.ref('orderMoney/' + id).set(m),
+      listenMoney(f) { this.stopMoney(); const r = db.ref('orderMoney'); const h = r.on('value', sn => f(sn.val() || {}), e => console.error(e)); offMoney = () => r.off('value', h); },
+      stopMoney() { if (offMoney) { offMoney(); offMoney = null; } },
+      async migrateMoney() {          // one-time (admin): move old totals/prices out of orders/ into orderMoney/
+        const all = (await db.ref('orders').once('value')).val() || {}, up = {}; let n = 0;
+        Object.entries(all).forEach(([id, o]) => {
+          if (o.total == null && !(o.items || []).some(i => i.price != null)) return;
+          up['orderMoney/' + id] = { owner: o.owner || null, subtotal: o.subtotal ?? null, total: o.total ?? null, prices: (o.items || []).map(i => i.price ?? 0), day: o.day || null, createdAt: o.createdAt || null };
+          up['orders/' + id + '/total'] = null; up['orders/' + id + '/subtotal'] = null;
+          (o.items || []).forEach((_, k) => { up['orders/' + id + '/items/' + k + '/price'] = null; });
+          n++;
+        });
+        if (n) await db.ref().update(up);
+        return n;
       },
       listStaff(f) { db.ref('staff').on('value', s => f(s.val() || {}), e => console.error(e)); },
       setStaff: (email, role) => db.ref('staff/' + emailKey(email)).set(role),
@@ -141,18 +185,21 @@
 
   /* ---------- state ---------- */
   let store = null, orders = [], known = null, role = 'customer', staffEmail = '';
+  let rawOrders = [], moneyMap = {}, restaurant = null, menuItems = [], creating = false;
   let mineId = sessionStorage.getItem('eatongo_order') || null, lastMineStatus = null;
   let opsTab = 'live', queueTab = 'live';
   let settleAuth; const authSettled = new Promise(r => { settleAuth = r; });
   const NEXT = { new: 'preparing', preparing: 'ready', ready: 'collected' };
   const FLOW_INDEX = { new: 0, preparing: 2, ready: 3, collected: 4 };
   const isStaffRole = () => role === 'vendor' || role === 'admin';
+  const outletCode = () => (typeof currentOutlet !== 'undefined' && currentOutlet === 'mingos') ? 'MING-001' : 'HARI-001';
+  const outletKind = c => c === 'MING-001' ? 'mingos' : 'hari';
 
   const isLive = o => !['collected','declined'].includes(o.status) && o.pickup !== 'pre';
   const isPre = o => !['collected','declined'].includes(o.status) && o.pickup === 'pre';
   const isDone = o => ['collected','declined'].includes(o.status);
   const itemsText = o => (o.items || []).map(i => `${esc(i.name)} × ${i.qty}`).join(', ');
-  const metaText = o => `${esc(o.id)} · ${esc(o.customer)} · ₹${o.total} · Paid · ${timeStr(o.createdAt)}${o.pickup === 'pre' ? ' · Pre-order ' + esc(o.pickupTime) : ''}`;
+  const metaText = o => `${esc(o.id)} · ${esc(o.customer)}${o.total != null ? ' · ₹' + o.total : ''} · Paid · ${timeStr(o.createdAt)}${o.pickup === 'pre' ? ' · Pre-order ' + esc(o.pickupTime) : ''}`;
 
   /* ---------- roles / login ---------- */
   function inVendorView() { return document.body.classList.contains('vendor-mode') || document.body.classList.contains('ops-mode'); }
@@ -162,7 +209,7 @@
   }
 
   function setRole(r) {
-    role = r; store.stop(); known = null; orders = []; lastMineStatus = null;
+    role = r; store.stop(); store.stopMoney(); known = null; orders = []; rawOrders = []; moneyMap = {}; lastMineStatus = null;
     document.body.classList.toggle('restricted-vendor', r === 'vendor');
     if (r === 'customer') {
       mountAdminPanel(false);
@@ -172,6 +219,7 @@
     } else {
       sessionStorage.setItem('eatongo_vendor', '1');
       store.listenAll(onOrders);
+      if (r === 'admin') store.listenMoney(m => { moneyMap = m; applyOrders(); });
       mountAdminPanel(r === 'admin');
     }
   }
@@ -212,14 +260,31 @@
     btn.textContent = 'Log out' + (n ? ' · ' + n.slice(0, 12) : '');
   }
 
+  function brandName(code) { return (restaurant && restaurant.name) || (code === 'MING-001' ? 'Mingos' : 'Hari Super Sandwich'); }
+
   function applyVendorOutlet(code) {
-    const name = code === 'MING-001' ? 'Mingos' : 'Hari Super Sandwich';
-    document.querySelectorAll('#vendorApp .side .brand .navlabel, #vendorOps .ops-hero .eyebrow').forEach(x => x.textContent = name);
-    const qr = $('#shopQrCard'); if (qr) { const p = qr.querySelector('p'); if (p) p.innerHTML = `Place this at the counter. Customers scan it to open the current menu. Outlet code: <b>${code}</b>`; }
-    const h = $('#vpage-overview h1'); if (h) h.textContent = code === 'MING-001' ? 'Good afternoon, Mingos.' : 'Good afternoon, Hari.';
+    const name = brandName(code);
+    document.querySelectorAll('#vendorApp .side .brand .navlabel, #vendorOps .ops-hero .eyebrow, .outlet-name, .cart-sub').forEach(x => x.textContent = name);
+    const qr = $('#shopQrCard'); if (qr) { const p = qr.querySelector('p'); if (p) p.innerHTML = `Place this at the counter. Customers scan it to open the current menu. Outlet code: <b>${esc(code)}</b>`; }
+    const h = $('#vpage-overview h1'); if (h) h.textContent = 'Good afternoon, ' + name.split(' ')[0] + '.';
+    if (typeof renderOutletQr === 'function') renderOutletQr();
+  }
+
+  /* after a staff login: registered restaurant -> dashboard; admin on a new restaurant -> registration form */
+  async function afterStaffLogin() {
+    const msg = $('#vendorAuthMsg');
+    if (restaurant) { openVendorOps(); return; }
+    if (role === 'admin') {
+      const pn = $('#placeName'); if (pn) pn.value = brandName(outletCode());
+      screen('vendorPlace'); return;
+    }
+    if (msg) { msg.style.color = '#a43d32'; msg.textContent = 'This restaurant has not been registered yet. Ask your admin to sign in once and set it up.'; }
+    sessionStorage.removeItem('eatongo_vendor');
+    await store.auth.signOut();
   }
 
   async function onUser(user) {
+    if (creating && user) return;                  // account-creation flow handles its own sign-out
     if (!user) {                                   // nobody signed in -> silent anonymous (customer)
       try { await store.auth.signInAnonymously(); }
       catch (e) { console.error(e); toast('<b>Setup needed.</b> Enable Anonymous sign-in in Firebase.'); settleAuth(); }
@@ -227,24 +292,30 @@
     }
     if (user.isAnonymous) { setRole('customer'); refreshCustomerBadge(); settleAuth(); return; }
 
-    let r = null;
-    try { r = user.email ? await store.roleOf(user.email) : null; } catch (e) { console.error(e); }
-    if (r && !sessionStorage.getItem('eatongo_customer_intent')) {   // staff (unless they used the customer sign-in)
-      setRole(r);
-      const selected = sessionStorage.getItem('eatongo_vendor_outlet') || 'HARI-001';
-      if (typeof setOutlet === 'function') setOutlet(selected === 'MING-001' ? 'mingos' : 'hari');
-      applyVendorOutlet(selected);
-      history.replaceState(null, '', location.pathname + '?vendor=overview');
+    const intent = sessionStorage.getItem('eatongo_intent');
+    let rec = null;
+    try { rec = await store.roleOf(user); } catch (e) { console.error(e); }
+    if (rec && !sessionStorage.getItem('eatongo_customer_intent')) {   // staff (unless they used the customer sign-in)
+      setRole(rec.role);
       staffEmail = (user.email || '').toLowerCase();
+      const outlet = (rec.role === 'vendor' && rec.outlet) ? rec.outlet : (sessionStorage.getItem('eatongo_vendor_outlet') || 'HARI-001');
+      sessionStorage.setItem('eatongo_vendor_outlet', outlet);
+      setOutlet(outletKind(outlet));
+      restaurant = null;
+      try { restaurant = await store.getRestaurant(outlet); } catch (e) { console.error(e); }
+      applyVendorOutlet(outlet);
+      history.replaceState(null, '', location.pathname + '?vendor=overview');
       const card = $('#vendorAuth');
-      if (card && !card.classList.contains('hidden')) {
-        if (sessionStorage.getItem('eatongo_intent')) { sessionStorage.removeItem('eatongo_intent'); screen('vendorPlace'); }
-        else openVendorOps();                       // already signed in from before: go straight in
-      }
-    } else if (!r && sessionStorage.getItem('eatongo_intent')) {      // tried the vendor sign-in but is not staff
+      if (card && !card.classList.contains('hidden')) { sessionStorage.removeItem('eatongo_intent'); await afterStaffLogin(); }
+    } else if (!rec && intent) {                   // tried the vendor sign-in but is not staff
       sessionStorage.removeItem('eatongo_intent');
       const m = $('#vendorAuthMsg');
-      if (m) m.textContent = `${user.email} is not an approved vendor. Ask your admin to add this email.`;
+      if (!user.emailVerified) {
+        user.sendEmailVerification().catch(() => {});
+        if (m) m.textContent = `Please verify your email first. We sent a link to ${user.email}. Open it, then sign in again.`;
+      } else if (m) {
+        m.textContent = `${user.email} is not an approved vendor. Ask your admin to add this email. (Restaurant owner? Add this ID under "admins" in Firebase: ${user.uid})`;
+      }
       toast('<b>Not authorised.</b> This account is not a vendor.');
       await store.auth.signOut();                  // -> anonymous again
     } else {
@@ -299,20 +370,34 @@
     // same user was already signed in -> Firebase fires no auth event, so continue here
     const u = s.auth.currentUser;
     if (u && !u.isAnonymous && isStaffRole() && (u.email || '').toLowerCase() === staffEmail) {
-      sessionStorage.removeItem('eatongo_intent'); screen('vendorPlace');
+      sessionStorage.removeItem('eatongo_intent'); await afterStaffLogin();
     } else {
       setTimeout(() => { const c = $('#vendorAuth'); if (c && !c.classList.contains('hidden') && msg && msg.textContent === 'Signing in…') msg.textContent = 'Signed in, but could not load your vendor access. Press F12 → Console and send me the red error.'; }, 6000);
     }
   };
 
+  /* first-time vendor: create account -> verify email -> sign in. Only emails the admin added get access. */
   const vendorCreate = $('#vendorCreateAccount');
   if (vendorCreate) vendorCreate.onclick = async () => {
-    const email=$('#vendorEmail').value.trim().toLowerCase(), pass=$('#vendorPass').value, msg=$('#vendorAuthMsg');
-    sessionStorage.setItem('eatongo_vendor_outlet', $('#vendorOutlet')?.value || 'HARI-001');
-    const s=store||await ready;
-    if(s.mode==='local'){if(msg)msg.textContent='Local mode does not require account setup.';return;}
-    try { const approved=await s.roleOf(email); if(!approved){if(msg)msg.textContent='This email has not been authorised by an admin.';return;} await s.createUserEmail(email,pass); }
-    catch(err){if(msg)msg.textContent=err.code==='auth/email-already-in-use'?'Account already exists. Use Sign in.':'Could not create the account. Check the authorised email.';}
+    const email = $('#vendorEmail').value.trim().toLowerCase(), pass = $('#vendorPass').value, msg = $('#vendorAuthMsg');
+    const say = (t, bad) => { if (msg) { msg.style.color = bad ? '#a43d32' : '#5d625b'; msg.textContent = t; } };
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { say('Enter the email your admin added.', true); return; }
+    if (pass.length < 6) { say('Choose a password of at least 6 characters.', true); return; }
+    const s = store || await ready;
+    if (s.mode === 'local') { say('Local mode does not require account setup.'); return; }
+    await Promise.race([authSettled, new Promise(r => setTimeout(r, 4000))]);
+    creating = true; say('Creating your account…');
+    try {
+      const cred = await s.createUserEmail(email, pass);
+      await cred.user.sendEmailVerification();
+      await s.auth.signOut();
+      say(`Account created. We sent a verification link to ${email}. Open it, then come back and press Sign in.`);
+    } catch (err) {
+      console.error(err);
+      say(err.code === 'auth/email-already-in-use' ? 'Account already exists. Use Sign in.'
+        : err.code === 'auth/weak-password' ? 'Password is too weak. Use at least 6 characters.'
+        : 'Could not create the account. Check the email and try again.', true);
+    } finally { creating = false; }
   };
 
   /* customer register / log in */
@@ -384,18 +469,173 @@
     if (side && !$('#signOutSide')) { const b = document.createElement('button'); b.id = 'signOutSide'; b.className = 'navbtn'; b.innerHTML = '<span>⎋</span><span class="navlabel">Sign out</span>'; b.onclick = go; side.appendChild(b); }
   }
 
-  /* ---------- admin panel: manage vendor emails ---------- */
+  /* ---------- restaurant registration (admin, first time) ---------- */
+  const placeForm = $('#vendorPlaceForm');
+  if (placeForm) placeForm.onsubmit = async e => {
+    e.preventDefault();
+    const name = $('#placeName').value.trim();
+    if (name.length < 2 || name.length > 60) { toast('<b>Enter a restaurant name</b> (2 to 60 characters).'); return; }
+    const info = { name, type: ($('#placeType') || {}).value || '', location: (($('#placeLoc') || {}).value || '').trim().slice(0, 80), code: outletCode(), ownerEmail: staffEmail || null, registeredAt: Date.now() };
+    const btn = placeForm.querySelector('button[type=submit]'); if (btn) btn.disabled = true;
+    try {
+      const s = store || await ready;
+      if (s.mode !== 'local' && role !== 'admin') throw new Error('Only the admin can register the restaurant');
+      await s.saveRestaurant(outletCode(), info);
+      restaurant = { ...(restaurant || {}), ...info };
+      applyVendorOutlet(outletCode());
+      toast('<b>Restaurant registered.</b> ' + esc(name));
+      screen('vendorMenuSetup');
+    } catch (err) { console.error(err); toast('<b>Could not save.</b> Only the admin account can register the restaurant.'); }
+    finally { if (btn) btn.disabled = false; }
+  };
+
+  /* menu-setup step: sample rows become the first real menu (only if the menu is still empty) */
+  document.addEventListener('click', e => {
+    const x = e.target.closest('#vendorMenuSetup .mini-item button'); if (x) x.closest('.mini-item').remove();
+  });
+  const finishBtn = $('#finishVendor');
+  if (finishBtn) finishBtn.onclick = async () => {
+    try {
+      if (isStaffRole() && role === 'admin' && !menuItems.length) {
+        const rows = $$('#vendorMenuSetup .mini-item').map(r => { const [n, p] = r.querySelectorAll('input'); return { name: n.value.trim(), price: parseInt(String(p.value).replace(/[^\d]/g, ''), 10) }; }).filter(x => x.name && x.price > 0);
+        let k = 0;
+        for (const r of rows) await store.menuSet(outletCode(), newId(), { name: r.name, desc: '', price: r.price, cat: 'Menu', veg: true, popular: true, available: true, order: Date.now() + (k++) });
+      }
+    } catch (err) { console.error(err); toast('<b>Menu not saved.</b> You can add items later under Menu.'); }
+    openVendorOps();
+    toast('<b>Restaurant ready.</b> Orders are live.');
+  };
+
+  /* ---------- live menu: customers read it, only the admin edits it ---------- */
+  let editingId = null;
+  const newId = () => 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+
+  async function watchMenu(code) {
+    store = store || await ready; await authSettled;
+    try { const r = await store.getRestaurant(code); if (code === outletCode()) { restaurant = r || null; applyVendorOutlet(code); } } catch (e) { /* offline */ }
+    try { store.menuListen(code, onMenu); } catch (e) { console.error(e); }
+  }
+
+  function onMenu(items) {
+    menuItems = items;
+    if (items.length) {
+      const sorted = items.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+      const inCart = {}; Object.entries(cart).forEach(([i, q]) => { if (q > 0 && foods[i]) inCart[foods[i].raw || foods[i].name] = q; });
+      foods = sorted.filter(m => m.available !== false).map(m => ({
+        id: m.id, raw: m.name, name: esc(m.name), desc: esc(m.desc || ''), price: Math.max(0, Math.round(+m.price || 0)),
+        cat: String(m.cat || 'Menu'), popular: !!m.popular, veg: m.veg !== false
+      }));
+      const nc = {}; foods.forEach((f, i) => { if (inCart[f.raw]) nc[i] = inCart[f.raw]; }); cart = nc;
+      if (typeof renderMenu === 'function') renderMenu();
+      if (typeof renderCart === 'function') renderCart();
+    }
+    renderMenuTable();
+  }
+
+  function renderMenuTable() {
+    const tb = $('#menuTable'); if (!tb || role !== 'admin') return;
+    const note = $('#menuNote');
+    if (note) note.innerHTML = menuItems.length ? '' : '<div class="panel" style="margin-bottom:14px"><b>Customers currently see the built-in demo menu.</b><p class="sub">Add your first item, or load the demo items here so you can edit them.</p><button class="status preparing" data-m-seed type="button">Load demo items</button></div>';
+    const sorted = menuItems.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+    tb.innerHTML = sorted.map(m => `<tr><td><b>${esc(m.name)}</b>${m.veg === false ? ' <small>(non-veg)</small>' : ''}<br><small>${esc(m.desc || '')}</small></td><td>${esc(m.cat)}</td><td>₹${esc(m.price)}</td><td><button class="toggle ${m.popular ? 'on' : ''}" data-m-pop="${esc(m.id)}" aria-label="Popular"></button></td><td><button class="toggle ${m.available !== false ? 'on' : ''}" data-m-avail="${esc(m.id)}" aria-label="Available"></button></td><td style="white-space:nowrap"><button class="status ready" data-m-edit="${esc(m.id)}" type="button">Edit</button> <button class="status preparing" data-m-del="${esc(m.id)}" type="button">Delete</button></td></tr>`).join('')
+      || '<tr><td colspan="6" class="sub">No items yet. Press “+ Add item”.</td></tr>';
+    const dl = $('#menuCats'); if (dl) dl.innerHTML = [...new Set(menuItems.map(m => m.cat))].map(c => `<option value="${esc(c)}">`).join('');
+  }
+
+  function openMenuForm(m) {
+    editingId = m ? m.id : null;
+    $('#menuFormTitle').textContent = m ? 'Edit item' : 'Add item';
+    $('#mName').value = m ? m.name : ''; $('#mCat').value = m ? m.cat : ''; $('#mPrice').value = m ? m.price : '';
+    $('#mDesc').value = m ? (m.desc || '') : ''; $('#mVeg').value = m && m.veg === false ? '0' : '1';
+    $('#mPop').checked = m ? !!m.popular : false; $('#mAvail').checked = m ? m.available !== false : true;
+    $('#menuForm').classList.remove('hidden'); $('#mName').focus();
+  }
+
+  function mountMenuManager() {
+    const page = $('#vpage-menu'); if (!page || $('#menuForm')) return;
+    const inp = 'width:100%;padding:11px;border-radius:10px;border:1px solid #30372f;background:#11150f;color:#f3f6f1;font:inherit;margin-top:4px';
+    const f = document.createElement('form'); f.id = 'menuForm'; f.className = 'panel hidden'; f.style.marginBottom = '14px';
+    f.innerHTML = `<h2 id="menuFormTitle">Add item</h2>
+      <div style="display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+        <label>Name<input id="mName" required maxlength="60" style="${inp}"></label>
+        <label>Category<input id="mCat" required maxlength="30" list="menuCats" placeholder="e.g. Biryani, Combos, Desserts" style="${inp}"></label>
+        <label>Price (₹)<input id="mPrice" type="number" min="1" max="100000" required style="${inp}"></label>
+        <label>Type<select id="mVeg" style="${inp}"><option value="1">Veg</option><option value="0">Non-veg</option></select></label>
+      </div>
+      <label style="display:block;margin-top:10px">Description<input id="mDesc" maxlength="140" style="${inp}"></label>
+      <datalist id="menuCats"></datalist>
+      <div style="display:flex;gap:18px;margin:12px 0;flex-wrap:wrap"><label><input id="mPop" type="checkbox"> Show under Popular</label><label><input id="mAvail" type="checkbox" checked> Available to customers</label></div>
+      <button class="primary dark" type="submit" style="width:auto;margin:0 8px 0 0">Save item</button><button class="back" id="mCancel" type="button">Cancel</button>`;
+    page.insertBefore(f, $('#menuNote'));
+    $('#menuAddBtn').onclick = () => openMenuForm(null);
+    $('#mCancel').onclick = () => f.classList.add('hidden');
+    f.onsubmit = async e => {
+      e.preventDefault(); if (role !== 'admin') return;
+      const old = menuItems.find(x => x.id === editingId);
+      const item = { name: $('#mName').value.trim(), cat: $('#mCat').value.trim(), price: Math.round(Number($('#mPrice').value)), desc: $('#mDesc').value.trim(),
+        veg: $('#mVeg').value === '1', popular: $('#mPop').checked, available: $('#mAvail').checked, order: old ? (old.order || Date.now()) : Date.now() };
+      if (!item.name || !item.cat || !(item.price > 0)) { toast('<b>Name, category and a price are required.</b>'); return; }
+      try { await store.menuSet(outletCode(), editingId || newId(), item); f.classList.add('hidden'); toast('<b>Saved.</b> Customers see this instantly.'); }
+      catch (err) { console.error(err); toast('<b>Could not save.</b> Only the admin can edit the menu.'); }
+    };
+    page.addEventListener('click', async e => {
+      if (role !== 'admin') return;
+      const g = a => e.target.closest(a), code = outletCode();
+      const find = id => menuItems.find(x => x.id === id), strip = ({ id, ...rest }) => rest;
+      try {
+        let b;
+        if ((b = g('[data-m-edit]'))) { const m = find(b.dataset.mEdit); if (m) openMenuForm(m); }
+        else if ((b = g('[data-m-del]'))) { const m = find(b.dataset.mDel); if (m && confirm(`Delete “${m.name}”?`)) { await store.menuRemove(code, m.id); toast('<b>Deleted.</b>'); } }
+        else if ((b = g('[data-m-pop]'))) { const m = find(b.dataset.mPop); if (m) await store.menuSet(code, m.id, { ...strip(m), popular: !m.popular }); }
+        else if ((b = g('[data-m-avail]'))) { const m = find(b.dataset.mAvail); if (m) await store.menuSet(code, m.id, { ...strip(m), available: m.available === false }); }
+        else if (g('[data-m-seed]')) {
+          const base = (typeof outletMenus !== 'undefined' && outletMenus[currentOutlet]) || [];
+          let k = 0; for (const it of base) await store.menuSet(code, newId(), { name: it.name, desc: it.desc || '', price: it.price, cat: it.cat, veg: true, popular: !!it.popular, available: true, order: Date.now() + (k++) });
+          toast('<b>Demo items loaded.</b> Edit them as you like.');
+        }
+      } catch (err) { console.error(err); toast('<b>Not allowed.</b> Only the admin can edit the menu.'); }
+    });
+    renderMenuTable();
+  }
+
+  /* ---------- admin: business summary (revenue + estimated profit) ---------- */
+  function renderInsights() {
+    const body = $('#insightBody'); if (!body || role !== 'admin') return;
+    const live = orders.filter(o => o.status !== 'declined'), now = Date.now();
+    const cp = restaurant && restaurant.costPct != null && restaurant.costPct !== '' ? Number(restaurant.costPct) : null;
+    const ranges = [['Today', o => o.day === today()], ['Last 7 days', o => o.createdAt >= now - 7 * 864e5], ['Last 30 days', o => o.createdAt >= now - 30 * 864e5]];
+    const cards = ranges.map(([label, fn]) => {
+      const l = live.filter(fn), rev = l.reduce((a, o) => a + (o.total || 0), 0), prof = cp == null ? null : Math.round(rev * (1 - cp / 100));
+      return `<div class="stat"><small>${label}</small><strong>₹${rev.toLocaleString('en-IN')}</strong><small>${l.length} orders${prof != null ? ' · est. profit ₹' + prof.toLocaleString('en-IN') : ''}</small></div>`;
+    }).join('');
+    const qty = {}; live.filter(o => o.createdAt >= now - 30 * 864e5).forEach(o => (o.items || []).forEach(i => { qty[i.name] = (qty[i.name] || 0) + (i.qty || 0); }));
+    const top = Object.entries(qty).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n, q]) => `<div class="history-row"><span>${esc(n)}</span><b>${q}</b></div>`).join('');
+    body.innerHTML = `<div class="stats" style="grid-template-columns:repeat(3,1fr)">${cards}</div><h3 style="margin:16px 0 6px">Top items (30 days)</h3>${top || '<p class="sub">No orders yet.</p>'}`;
+    const ci = $('#costPct'); if (ci && document.activeElement !== ci) ci.value = cp == null ? '' : cp;
+  }
+
+  /* ---------- admin panel: business summary + manage vendor emails ---------- */
   function mountAdminPanel(on) {
-    let p = $('#adminPanel');
-    if (!on) { if (p) p.remove(); return; }
+    let p = $('#adminPanel'), q = $('#adminInsights');
+    if (!on) { if (p) p.remove(); if (q) q.remove(); return; }
     if (p) return;
+    mountMenuManager();
+    q = document.createElement('div'); q.id = 'adminInsights'; q.className = 'panel'; q.style.marginTop = '16px';
+    q.innerHTML = '<div class="eyebrow">Admin only</div><h2>Business summary</h2><p class="sub">Revenue is read from private order-money records that vendors cannot access.</p><label class="sub" style="display:block;margin:10px 0">Food cost % (to estimate profit) <input id="costPct" type="number" min="0" max="100" placeholder="e.g. 35" style="width:90px;margin-left:8px;padding:8px;border-radius:8px;border:1px solid #30372f;background:#11150f;color:#f3f6f1"></label><div id="insightBody"></div>';
+    $('#vpage-overview').appendChild(q);
+    $('#costPct').onchange = async e => {
+      const v = Math.max(0, Math.min(100, Number(e.target.value)));
+      if (e.target.value === '' || isNaN(v)) return;
+      try { await store.saveRestaurant(outletCode(), { costPct: v }); restaurant = { ...(restaurant || {}), costPct: v }; renderInsights(); toast('<b>Saved.</b> Profit estimate updated.'); }
+      catch (err) { console.error(err); toast('<b>Could not save.</b>'); }
+    };
     p = document.createElement('div'); p.id = 'adminPanel'; p.className = 'panel'; p.style.marginTop = '16px';
-    p.innerHTML = '<div class="eyebrow">Admin only</div><h2>Authorised members</h2><p class="sub">Add or remove member email IDs and choose whether each member is an admin or vendor.</p><div class="scan-input" style="margin:12px 0"><input id="staffEmail" type="email" placeholder="member@gmail.com" style="text-transform:none"/><select id="staffRole"><option value="vendor">Vendor</option><option value="admin">Admin</option></select><button id="staffAdd" type="button">Add member</button></div><div id="staffList"></div>';
+    p.innerHTML = '<div class="eyebrow">Admin only</div><h2>Vendor accounts</h2><p class="sub">Vendors can take and complete orders. They cannot see revenue or profit, edit the menu, or manage accounts. After you add an email, the vendor opens the sign-in page, presses “First time? Create your account”, verifies their email, and signs in.</p><div class="scan-input" style="margin:12px 0"><input id="staffEmail" type="email" placeholder="vendor@gmail.com" style="text-transform:none"/><select id="staffOutlet"><option value="HARI-001">Hari Super Sandwich</option><option value="MING-001">Mingos</option></select><button id="staffAdd" type="button">Add vendor</button></div><div id="staffList"></div>';
     $('#vpage-overview').appendChild(p);
     $('#staffAdd').onclick = async () => {
       const email = $('#staffEmail').value.trim().toLowerCase();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('<b>Enter a valid email.</b>'); return; }
-      try { await store.setStaff(email, $('#staffRole').value); $('#staffEmail').value = ''; toast('<b>Member added.</b> ' + esc(email)); }
+      try { await store.setStaff(email, { role: 'vendor', outlet: $('#staffOutlet').value }); $('#staffEmail').value = ''; toast('<b>Vendor added.</b> ' + esc(email)); }
       catch (e) { console.error(e); toast('<b>Could not add.</b> Check database rules.'); }
     };
     p.addEventListener('click', async e => {
@@ -403,12 +643,12 @@
       try { await store.removeStaff(b.dataset.staffRm); toast('<b>Removed.</b>'); } catch (err) { toast('<b>Could not remove.</b>'); }
     });
     store.listStaff(map => {
-      const me = ((store.auth && store.auth.currentUser && store.auth.currentUser.email) || '').toLowerCase();
       $('#staffList').innerHTML = Object.entries(map).map(([k, v]) => {
-        const em = keyEmail(k);
-        return `<div class="history-row"><span><b>${esc(em)}</b><br><small>${esc(v)}</small></span>${em.toLowerCase() === me ? '<small>you</small>' : `<button class="status preparing" data-staff-rm="${esc(em)}">Remove</button>`}</div>`;
+        const em = keyEmail(k), role_ = typeof v === 'string' ? v : (v && v.role) || '?', out = v && v.outlet ? ' · ' + v.outlet : '';
+        return `<div class="history-row"><span><b>${esc(em)}</b><br><small>${esc(role_)}${esc(out)}</small></span><button class="status preparing" data-staff-rm="${esc(em)}">Remove</button></div>`;
       }).join('') || '<p class="sub">No vendors yet.</p>';
     });
+    renderInsights();
   }
 
   /* ---------- customer: place order ---------- */
@@ -421,7 +661,7 @@
   async function placeOrder() {
     const snapshot = { ...cart };
     const items = Object.entries(snapshot).filter(([, q]) => q > 0)
-      .map(([i, q]) => ({ name: foods[i].name, qty: q, price: foods[i].price }));
+      .map(([i, q]) => ({ name: foods[i].raw || foods[i].name, qty: q, price: foods[i].price }));
     if (!items.length) return;
 
     let name = (sessionStorage.getItem('eatongoCustomerName') || '').trim();
@@ -442,13 +682,17 @@
       if (!owner) throw new Error('Not signed in (enable Anonymous auth in Firebase)');
       const day = today();
       const [c, auth] = await Promise.all([store.counters(day), store.claimAuth(day)]);
+      const createdAt = Date.now(), id = 'HS-' + c.no;
+      // prices/totals go to orderMoney/ (admin + the customer only); orders/ is what vendors can read
+      const money = { owner, subtotal, total: Math.round(subtotal * 1.05), prices: items.map(i => i.price), outlet: outletCode(), day, createdAt };
       const order = {
-        id: 'HS-' + c.no, no: c.no, token: String(c.token), auth, owner,
-        customer: name, items, subtotal, total: Math.round(subtotal * 1.05),
+        id, no: c.no, token: String(c.token), auth, owner, outlet: outletCode(),
+        customer: name, items: items.map(i => ({ name: i.name, qty: i.qty })),
         pickup: pre ? 'pre' : 'now',
         pickupTime: pre ? `${+preorderHour}:${preorderMinute} ${preorderPeriod}` : null,
-        status: 'new', paid: true, createdAt: Date.now(), day
+        status: 'new', paid: true, createdAt, day
       };
+      await store.saveMoney(id, money);
       await store.save(order);
       const cu = store.auth && store.auth.currentUser; if (cu && !cu.isAnonymous) store.setLastOrder(cu.uid, order.id).catch(() => {});
       mineId = order.id; lastMineStatus = 'new';
@@ -489,6 +733,7 @@
   function renderVendor() {
     const live = byTab('live'), pre = byTab('pre'), done = byTab('completed');
     const active = orders.filter(o => o.status !== 'collected');
+    renderInsights();
 
     $$('[data-ops-tab]').forEach(b => {
       const t = b.dataset.opsTab;
@@ -509,8 +754,8 @@
     });
     const liveBadge = $('#vpage-queue .live'); if (liveBadge) liveBadge.textContent = `${active.length} active`;
 
-    const td = orders.filter(o => o.day === today());
-    const sales = td.reduce((a, o) => a + o.total, 0);
+    const td = orders.filter(o => o.day === today() && o.status !== 'declined');
+    const sales = td.reduce((a, o) => a + (o.total || 0), 0);
     const recent = orders.filter(o => Date.now() - o.createdAt < 15 * 60000).length;
     const st = $$('#vpage-overview .stat');
     if (st.length >= 4) {
@@ -569,10 +814,22 @@
   function onOrders(list) {
     const fresh = known === null ? [] : list.filter(o => !known.has(o.id));
     known = new Set(list.map(o => o.id));
-    orders = list.slice().sort((a, b) => a.createdAt - b.createdAt);
+    rawOrders = list;
+    applyOrders(fresh);
+  }
+
+  function applyOrders(fresh = []) {
+    let list = rawOrders.slice();
+    if (isStaffRole()) list = list.filter(o => !o.outlet || o.outlet === outletCode());   // each outlet sees its own orders
+    orders = list.map(o => {
+      const m = moneyMap[o.id];
+      if (role === 'admin') return m ? { ...o, subtotal: m.subtotal, total: m.total, items: (o.items || []).map((i, k) => ({ ...i, price: (m.prices || [])[k] ?? i.price })) } : o;
+      if (role === 'vendor') { const { total, subtotal, ...rest } = o; return { ...rest, items: (o.items || []).map(({ price, ...i }) => i) }; }   // never show money to vendors
+      return o;
+    }).sort((a, b) => a.createdAt - b.createdAt);
     renderVendor();
 
-    if (isStaffRole() && inVendorView()) fresh.forEach(o => { toast(`<b>New order ${esc(o.id)}</b> · ${esc(o.customer)} · #${esc(o.auth)}`); beep(); });
+    if (isStaffRole() && inVendorView()) fresh.filter(o => !o.outlet || o.outlet === outletCode()).forEach(o => { toast(`<b>New order ${esc(o.id)}</b> · ${esc(o.customer)} · #${esc(o.auth)}`); beep(); });
 
     const mine = orders.find(o => o.id === mineId);
     if (mine) {
@@ -592,9 +849,22 @@
   /* ---------- start ---------- */
   ready.then(s => {
     store = s; injectSignOut();
-    if (s.mode === 'local') { role = 'admin'; s.listenAll(onOrders); settleAuth(); return; }   // local test: no login
+    if (s.mode === 'local') { role = 'admin'; s.listenAll(onOrders); s.listenMoney(m => { moneyMap = m; applyOrders(); }); mountAdminPanel(true); settleAuth(); return; }   // local test: no login
     s.auth.onAuthStateChanged(onUser);
   });
+
+  /* menu follows the outlet: wrap the page's setOutlet(), and start once for the outlet already open */
+  if (typeof setOutlet === 'function') { const _setOutlet = window.setOutlet; window.setOutlet = function (kind) { _setOutlet.apply(this, arguments); watchMenu(outletCode()); }; }
+  authSettled.then(() => watchMenu(outletCode()));
+
+  /* vendors can never open the money / menu pages, even by URL */
+  if (typeof showVPage === 'function') { const _sv = window.showVPage; window.showVPage = n => _sv(role === 'vendor' && ['analytics', 'loyalty', 'menu'].includes(n) ? 'overview' : n); }
+
+  /* run once in the browser console while signed in as admin: moves old totals out of vendor-readable orders */
+  window.eatongoMigrateMoney = async () => {
+    if (role !== 'admin') { console.warn('Admin only.'); return 0; }
+    const n = await store.migrateMoney(); console.log(n + ' old orders moved to private storage.'); return n;
+  };
 
   /* optional: eatongoExport() in console downloads orders.json (staff only) */
   window.eatongoExport = async () => {
