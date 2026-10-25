@@ -140,7 +140,13 @@
   })();
 
   /* ---------- state ---------- */
-  let store = null, orders = [], known = null, role = 'customer', staffEmail = '';
+  let store = null, orders = [], known = null, role = 'customer', staffEmail = '', activeOutletCode = 'HARI-001';
+
+  function outletOrders(list) {
+    if (activeOutletCode !== 'MING-001') return list;
+    const menu = ['Veg Biryani', 'Chicken Biryani', 'Paneer Biryani', 'Chicken 65'];
+    return list.map((o, i) => ({ ...o, outletCode: 'MING-001', items: [{ name: menu[i % menu.length], qty: i === 2 ? 2 : 1, price: [110, 160, 140, 120][i % 4] }] }));
+  }
   let mineId = sessionStorage.getItem('eatongo_order') || null, lastMineStatus = null;
   let opsTab = 'live', queueTab = 'live';
   let settleAuth; const authSettled = new Promise(r => { settleAuth = r; });
@@ -213,6 +219,7 @@
   }
 
   function applyVendorOutlet(code) {
+    activeOutletCode = code === 'MING-001' ? 'MING-001' : 'HARI-001';
     const name = code === 'MING-001' ? 'Mingos' : 'Hari Super Sandwich';
     document.querySelectorAll('#vendorApp .side .brand .navlabel, #vendorOps .ops-hero .eyebrow').forEach(x => x.textContent = name);
     const qr = $('#shopQrCard'); if (qr) { const p = qr.querySelector('p'); if (p) p.innerHTML = `Place this at the counter. Customers scan it to open the current menu. Outlet code: <b>${code}</b>`; }
@@ -569,7 +576,7 @@
   function onOrders(list) {
     const fresh = known === null ? [] : list.filter(o => !known.has(o.id));
     known = new Set(list.map(o => o.id));
-    orders = list.slice().sort((a, b) => a.createdAt - b.createdAt);
+    orders = outletOrders(list).slice().sort((a, b) => a.createdAt - b.createdAt);
     renderVendor();
 
     if (isStaffRole() && inVendorView()) fresh.forEach(o => { toast(`<b>New order ${esc(o.id)}</b> · ${esc(o.customer)} · #${esc(o.auth)}`); beep(); });
