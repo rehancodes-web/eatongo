@@ -430,7 +430,6 @@
   /* ---------- customer: place order ---------- */
   document.addEventListener('click', e => {
     if (e.target.id !== 'checkoutBtn') return;
-    if ($('#cartPanel').classList.contains('open')) return;   // existing handler closes cart only if valid
     placeOrder();
   });
 
