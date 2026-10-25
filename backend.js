@@ -267,7 +267,7 @@
   if (authForm) authForm.onsubmit = async e => {
     e.preventDefault();
     const msg = $('#vendorAuthMsg'); if (msg) { msg.style.color = '#5d625b'; msg.textContent = 'Signing in…'; }
-    const s = store || await ready;
+    const s = store || (store = await ready);
     const email = $('#vendorEmail').value.trim(), pass = $('#vendorPass').value;
     const selectedOutlet = $('#vendorOutlet')?.value || 'HARI-001';
     sessionStorage.setItem('eatongo_vendor_outlet', selectedOutlet);
@@ -355,7 +355,7 @@
     if ($('#customerEmail') && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { custMsg('Enter a valid email.', true); return; }
     if ($('#customerPass') && pass.length < 6) { custMsg('Password must be at least 6 characters.', true); return; }
 
-    const s = store || await ready;
+    const s = store || (store = await ready);
     if (s.mode === 'local') { sessionStorage.setItem('eatongoCustomerName', name || email); startScanner(); return; }
 
     const btn = $('#custSubmit'); btn.disabled = true; custMsg(reg ? 'Creating your account…' : 'Logging in…');
