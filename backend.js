@@ -274,7 +274,7 @@
     // The Mingos demo account must work even when Firebase is unavailable locally.
     if (selectedOutlet === 'MING-001' && email.toLowerCase() === 'rehanzn2007@gmail.com') {
       history.replaceState(null, '', location.pathname + '?vendor=overview');
-      store = s; role = 'admin'; sessionStorage.setItem('eatongo_vendor', '1'); store.listenAll(onOrders); setOutlet('mingos'); applyVendorOutlet('MING-001'); unlock(true); return;
+      store = s; role = 'admin'; sessionStorage.setItem('eatongo_vendor', '1'); store.listenAll(onOrders); setOutlet('mingos'); applyVendorOutlet('MING-001'); screen('vendorPlace'); return;
     }
     if (s.mode === 'local') {
       const selected = selectedOutlet;
@@ -282,7 +282,7 @@
       history.replaceState(null, '', location.pathname + '?vendor=overview');
       store = s; role = 'admin'; sessionStorage.setItem('eatongo_vendor', '1'); store.listenAll(onOrders);
       if (typeof setOutlet === 'function') setOutlet(selected === 'MING-001' ? 'mingos' : 'hari');
-      applyVendorOutlet(selected); unlock(true); return;
+      applyVendorOutlet(selected); screen('vendorPlace'); return;
     }
     sessionStorage.setItem('eatongo_intent', '1');
     const btn = authForm.querySelector('button[type=submit]'); if (btn) btn.disabled = true;
