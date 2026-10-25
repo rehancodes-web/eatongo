@@ -264,7 +264,7 @@
 
   function applyVendorOutlet(code) {
     const name = brandName(code);
-    document.querySelectorAll('#vendorApp .side .brand .navlabel, #vendorOps .ops-hero .eyebrow, .outlet-name, .cart-sub').forEach(x => x.textContent = name);
+    document.querySelectorAll('#vendorApp .side .brand .navlabel, #vendorOps .ops-hero .eyebrow, .outlet-name, .vendor-outlet-name, .cart-sub').forEach(x => x.textContent = name);
     const qr = $('#shopQrCard'); if (qr) { const p = qr.querySelector('p'); if (p) p.innerHTML = `Place this at the counter. Customers scan it to open the current menu. Outlet code: <b>${esc(code)}</b>`; }
     const h = $('#vpage-overview h1'); if (h) h.textContent = 'Good afternoon, ' + name.split(' ')[0] + '.';
     if (typeof renderOutletQr === 'function') renderOutletQr();
